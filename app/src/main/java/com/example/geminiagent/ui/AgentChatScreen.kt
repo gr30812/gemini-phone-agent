@@ -1,24 +1,27 @@
 package com.example.geminiagent.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.DeleteSweep
-import androidx.compose.material.icons.filled.QueryStats
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -26,18 +29,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.geminiagent.api.GeminiApiClient
 import com.example.geminiagent.model.ChatMessage
 import com.example.geminiagent.model.MessageSender
 import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import com.example.geminiagent.usage.UsageStats
+import com.example.geminiagent.voice.VoiceCommander
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -45,13 +55,18 @@ data class ModelOption(
     val id: String,
     val displayName: String,
     val badge: String,
-    val description: String
+    val tag: String,
+    val description: String,
+    val isAvailable: Boolean = true
 )
 
-val AVAILABLE_MODELS = listOf(
-    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "Recommended", "গুগলের অফিশিয়াল ফ্ল্যাগশিপ হাই-স্পিড মডেল"),
-    ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Ultra Stable", "দ্রুততম ও সবচেয়ে স্থিতিশীল মডেল (নো ডাউনটাইম)"),
-    ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Deep Thinking", "গুগলের শক্তিশালী প্রো মডেল (জটিল কোডিং ও যুক্তি)")
+val ANTIGRAVITY_MODELS = listOf(
+    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High", "Recommended", "গুগলের ফ্ল্যাগশিপ লেটেস্ট হাই-স্পিড এজেন্ট মডেল"),
+    ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Ultra Stable", "Fast", "জিরো ডাউনটাইম ও উচ্চ স্থিতিশীলতার লাইট মডেল"),
+    ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro (Thinking)", "Deep Thinking", "Preview", "জটিল কোডিং, মাল্টি-ফাইল রিফ্যাক্টরিং ও যুক্তি বিশ্লেষণ"),
+    ModelOption("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)", "Notice", "Alternative", "ক্লড সনেট কোডিং ইঞ্জিন", isAvailable = false),
+    ModelOption("gpt-oss-120b", "GPT-OSS 120B (Medium)", "Notice", "Alternative", "ওপেন সোর্স হাইব্রিড মডেল", isAvailable = false),
+    ModelOption("gemini-4-carbon", "Gemini 4 Carbon", "Unavailable", "Next-Gen", "আপকামিং নেক্সট-জেন মডেল", isAvailable = false)
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
@@ -65,9 +80,17 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         mutableStateOf(prefs.getString("selected_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
     }
 
+    // Voice Commander Integration
+    val voiceCommander = remember { VoiceCommander(context) }
+    val isListening by voiceCommander.isListening.collectAsState()
+    val partialSpeech by voiceCommander.partialText.collectAsState()
+    val soundLevel by voiceCommander.soundLevel.collectAsState()
+    val voiceError by voiceCommander.errorMessage.collectAsState()
+
     var showSettingsDialog by remember { mutableStateOf(apiKey.isEmpty()) }
     var showModelBottomSheet by remember { mutableStateOf(false) }
     var showUsageDialog by remember { mutableStateOf(false) }
+    var showQuickActionsSheet by remember { mutableStateOf(false) }
 
     val updater = remember { AppUpdater(context) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -78,7 +101,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     val initialMessage = ChatMessage(
         sender = MessageSender.AGENT,
-        text = "স্বাগতম! আমি আপনার নিজস্ব মোবাইল এআই এজেন্ট। আমি ব্যাকগ্রাউন্ডে সক্রিয় আছি। কোড লিখতে, ফাইল তৈরি করতে বা যেকোনো কাজ করতে বলুন।"
+        text = "স্বাগতম! আমি আপনার নিজস্ব মোবাইল Antigravity এআই এজেন্ট। আমি ব্যাকগ্রাউন্ডে সক্রিয় আছি। কোড লিখতে, ফাইল তৈরি করতে, টার্মিনাল কমান্ড চালাতে বা ভয়েস দিয়ে নির্দেশ দিতে পারেন।"
     )
     var messages by remember { mutableStateOf(listOf(initialMessage)) }
 
@@ -87,6 +110,66 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // Send Message Handler
+    fun doSendMessage(promptText: String) {
+        val trimmed = promptText.trim()
+        if (trimmed.isEmpty() || isLoading) return
+        if (apiKey.isEmpty()) {
+            showSettingsDialog = true
+            return
+        }
+
+        inputText = ""
+        val userMsg = ChatMessage(sender = MessageSender.USER, text = trimmed)
+        messages = messages + userMsg
+        isLoading = true
+
+        scope.launch {
+            listState.animateScrollToItem(messages.size - 1)
+            val response = apiClient.sendMessage(apiKey, trimmed, selectedModel)
+            val toolLogs = if (response.logs.isNotEmpty()) response.logs.joinToString("\n") else null
+            val agentMsg = ChatMessage(
+                sender = MessageSender.AGENT,
+                text = response.text,
+                toolLog = toolLogs
+            )
+            messages = messages + agentMsg
+            isLoading = false
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Audio Permission Launcher
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            voiceCommander.startListening { voiceResult ->
+                if (voiceResult.isNotBlank()) {
+                    doSendMessage(voiceResult)
+                }
+            }
+        } else {
+            Toast.makeText(context, "ভয়েস কমান্ড ব্যবহার করতে মাইক্রোফোন পারমিশন প্রয়োজন", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun toggleVoiceListening() {
+        if (isListening) {
+            voiceCommander.stopListening()
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                voiceCommander.startListening { voiceResult ->
+                    if (voiceResult.isNotBlank()) {
+                        doSendMessage(voiceResult)
+                    }
+                }
+            } else {
+                recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
 
     // Pull to Refresh Handler
     val pullRefreshState = rememberPullRefreshState(
@@ -104,68 +187,77 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         }
     )
 
-    val currentModelOption = AVAILABLE_MODELS.find { it.id == selectedModel } ?: AVAILABLE_MODELS[0]
+    val currentModelOption = ANTIGRAVITY_MODELS.find { it.id == selectedModel } ?: ANTIGRAVITY_MODELS[0]
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text("Gemini Phone Agent", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clickable { showModelBottomSheet = true }
-                                .padding(vertical = 2.dp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF2563EB).copy(alpha = 0.2f),
+                            modifier = Modifier.size(32.dp)
                         ) {
-                            Text(
-                                "⚡ ${currentModelOption.displayName}",
-                                fontSize = 11.5.sp,
-                                color = Color(0xFF38BDF8),
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Icon(
-                                Icons.Default.ArrowDropDown,
-                                contentDescription = "Select Model",
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                "• Background Active",
-                                fontSize = 10.5.sp,
-                                color = Color(0xFF4ADE80)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.AutoAwesome,
+                                    contentDescription = "Antigravity",
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Antigravity Agent", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color(0xFF1E293B)
+                                ) {
+                                    Text("v${updater.currentVersionName}", fontSize = 9.5.sp, color = Color(0xFF7DD3FC), modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .background(Color(0xFF4ADE80), CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("Background Active", fontSize = 10.5.sp, color = Color(0xFF4ADE80))
+                            }
                         }
                     }
                 },
                 actions = {
-                    // Clear Chat icon
                     IconButton(onClick = {
                         apiClient.clearHistory()
                         messages = listOf(initialMessage)
+                        Toast.makeText(context, "চ্যাট হিস্ট্রি ক্লিয়ার করা হয়েছে", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.LightGray)
                     }
-                    // Settings icon
                     IconButton(onClick = { showSettingsDialog = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1E1E1E),
+                    containerColor = Color(0xFF131314),
                     titleContentColor = Color.White
                 )
             )
         },
-        containerColor = Color(0xFF121212)
+        containerColor = Color(0xFF0F0F10)
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Main Chat Area with Pull-To-Refresh Box
+            // Main Chat Stream with Pull-To-Refresh
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -175,117 +267,249 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                     state = listState,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(messages, key = { it.id }) { msg ->
-                        ChatBubble(msg)
+                        AntigravityChatBubble(msg)
                     }
                     if (isLoading) {
                         item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text("${currentModelOption.displayName} কাজ করছে...", fontSize = 13.sp, color = Color.Gray)
-                            }
+                            AntigravityThinkingIndicator(modelName = currentModelOption.displayName)
                         }
                     }
                 }
 
-                // Pull-To-Refresh Animated Spinner at Top Center
                 PullRefreshIndicator(
                     refreshing = isRefreshing,
                     state = pullRefreshState,
                     modifier = Modifier.align(Alignment.TopCenter),
-                    backgroundColor = Color(0xFF2563EB),
-                    contentColor = Color.White
+                    backgroundColor = Color(0xFF1E293B),
+                    contentColor = Color(0xFF38BDF8)
                 )
             }
 
-            // Input Area
+            // Live Voice Recording Banner (if active)
+            AnimatedVisibility(visible = isListening) {
+                Surface(
+                    color = Color(0xFF1E293B),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Pulsing Voice Wave Dot
+                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                        val pulseScale by infiniteTransition.animateFloat(
+                            initialValue = 0.8f,
+                            targetValue = 1.4f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(600, easing = FastOutSlowInEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "pulseScale"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(14.dp)
+                                .scale(pulseScale + soundLevel)
+                                .background(Color(0xFFEF4444), CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("শুনছি... (কথা বলুন)", color = Color(0xFFFCA5A5), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            if (partialSpeech.isNotEmpty()) {
+                                Text(partialSpeech, color = Color.White, fontSize = 13.5.sp)
+                            }
+                        }
+                        IconButton(onClick = { voiceCommander.stopListening() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel Voice", tint = Color.LightGray)
+                        }
+                    }
+                }
+            }
+
+            // ANTIGRAVITY FLOATING PROMPT BAR
             Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF1E1E1E),
-                tonalElevation = 6.dp
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF1E1F22),
+                border = BorderStroke(1.dp, Color(0xFF2E3035)),
+                tonalElevation = 8.dp
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
+                    // Top Input Text Area
                     TextField(
                         value = inputText,
                         onValueChange = { inputText = it },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("এজেন্টকে কোনো কাজ দিন...", color = Color.Gray) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 40.dp, max = 120.dp),
+                        placeholder = {
+                            Text(
+                                "Ask anything, @ to mention, / for actions",
+                                color = Color(0xFF71717A),
+                                fontSize = 13.5.sp
+                            )
+                        },
                         colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xFF2A2A2A),
-                            unfocusedContainerColor = Color(0xFF2A2A2A),
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White,
-                            cursorColor = Color(0xFF2563EB),
+                            cursorColor = Color(0xFF38BDF8),
                             focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent
                         ),
-                        shape = RoundedCornerShape(24.dp),
                         maxLines = 4
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            val prompt = inputText.trim()
-                            if (prompt.isNotEmpty() && !isLoading) {
-                                if (apiKey.isEmpty()) {
-                                    showSettingsDialog = true
-                                    return@IconButton
-                                }
-                                inputText = ""
-                                val userMsg = ChatMessage(sender = MessageSender.USER, text = prompt)
-                                messages = messages + userMsg
-                                isLoading = true
 
-                                scope.launch {
-                                    listState.animateScrollToItem(messages.size - 1)
-                                    val response = apiClient.sendMessage(apiKey, prompt, selectedModel)
-                                    val toolLogs = if (response.logs.isNotEmpty()) response.logs.joinToString("\n") else null
-                                    val agentMsg = ChatMessage(
-                                        sender = MessageSender.AGENT,
-                                        text = response.text,
-                                        toolLog = toolLogs
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Bottom Control Row: + Button, Model Pill, Mic, Send/Stop
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Left Group: + Button & Model Pill
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // + Action Button
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF282A2D),
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clickable { showQuickActionsSheet = true }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = "Actions",
+                                        tint = Color(0xFFE4E4E7),
+                                        modifier = Modifier.size(18.dp)
                                     )
-                                    messages = messages + agentMsg
-                                    isLoading = false
-                                    listState.animateScrollToItem(messages.size - 1)
                                 }
                             }
-                        },
-                        enabled = inputText.isNotBlank() && !isLoading,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = Color(0xFF2563EB),
-                            contentColor = Color.White,
-                            disabledContainerColor = Color(0xFF333333),
-                            disabledContentColor = Color.Gray
-                        )
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Model Pill Selector (Antigravity Style)
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Color(0xFF282A2D),
+                                border = BorderStroke(1.dp, Color(0xFF3B3E45)),
+                                modifier = Modifier.clickable { showModelBottomSheet = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${currentModelOption.displayName} High",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFE4E4E7),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        Icons.Default.ArrowDropDown,
+                                        contentDescription = null,
+                                        tint = Color(0xFF9CA3AF),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Right Group: Mic (Voice Command) & Send/Stop Button
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Voice Microphone Button
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isListening) Color(0xFFEF4444).copy(alpha = 0.25f) else Color(0xFF282A2D),
+                                border = if (isListening) BorderStroke(1.5.dp, Color(0xFFEF4444)) else null,
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clickable { toggleVoiceListening() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Mic,
+                                        contentDescription = "Voice Command",
+                                        tint = if (isListening) Color(0xFFEF4444) else Color(0xFFE4E4E7),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Send or Stop Button
+                            if (isLoading) {
+                                // Antigravity Stop Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color(0xFFDC2626),
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clickable {
+                                            isLoading = false
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Stop,
+                                            contentDescription = "Stop Generation",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            } else {
+                                // Antigravity Send Button
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (inputText.isNotBlank()) Color(0xFF2563EB) else Color(0xFF333539),
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clickable(enabled = inputText.isNotBlank()) {
+                                            doSendMessage(inputText)
+                                        }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = "Send Prompt",
+                                            tint = if (inputText.isNotBlank()) Color.White else Color(0xFF71717A),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    // Model Selector BottomSheet
-    if (showModelBottomSheet) {
+    // Quick Actions Sheet (+ Button)
+    if (showQuickActionsSheet) {
         ModalBottomSheet(
-            onDismissRequest = { showModelBottomSheet = false },
-            containerColor = Color(0xFF1E1E1E),
+            onDismissRequest = { showQuickActionsSheet = false },
+            containerColor = Color(0xFF1A1A1E),
             scrimColor = Color.Black.copy(alpha = 0.6f)
         ) {
             Column(
@@ -293,33 +517,69 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
+                Text("Quick Actions & Commands", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                QuickActionItem(icon = Icons.Default.Mic, title = "Voice Command (ভয়েস নির্দেশ দিন)", subtitle = "মাইক্রোফোনে কথা বলে কোড বা নির্দেশ দিন") {
+                    showQuickActionsSheet = false
+                    toggleVoiceListening()
+                }
+                QuickActionItem(icon = Icons.Default.Folder, title = "List Workspace Files", subtitle = "ওয়ার্কস্পেসের ফাইলগুলো দেখুন (/list_files)") {
+                    showQuickActionsSheet = false
+                    doSendMessage("workspace এ কী কী ফাইল আছে তালিকা দেখাও")
+                }
+                QuickActionItem(icon = Icons.Default.Terminal, title = "Execute Shell Command", subtitle = "টার্মিনাল বা শেল কমান্ড চালান") {
+                    showQuickActionsSheet = false
+                    inputText = "execute_command: ls -la"
+                }
+                QuickActionItem(icon = Icons.Default.QueryStats, title = "View Usage & Rate Limits", subtitle = "দৈনিক এবং ৫-ঘণ্টার কোটা সীমা দেখুন") {
+                    showQuickActionsSheet = false
+                    showUsageDialog = true
+                }
+                QuickActionItem(icon = Icons.Default.Settings, title = "Agent Settings", subtitle = "API Key এবং OTA আপডেট সেটিংস") {
+                    showQuickActionsSheet = false
+                    showSettingsDialog = true
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // Antigravity Model Selector BottomSheet
+    if (showModelBottomSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showModelBottomSheet = false },
+            containerColor = Color(0xFF18181B),
+            scrimColor = Color.Black.copy(alpha = 0.6f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 12.dp)
+            ) {
                 Text(
-                    text = "মডেল নির্বাচন করুন (Model)",
+                    text = "Model",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Text(
-                    text = "আপনার কাজের জন্য সেরা মডেলটি বেছে নিন:",
-                    fontSize = 12.sp,
-                    color = Color.Gray,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+                Spacer(modifier = Modifier.height(12.dp))
 
-                AVAILABLE_MODELS.forEach { model ->
-                    val isSelected = model.id == selectedModel
+                ANTIGRAVITY_MODELS.forEach { model ->
+                    val isSelected = (model.id == selectedModel)
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .clickable {
+                            .clickable(enabled = model.isAvailable) {
                                 selectedModel = model.id
                                 prefs.edit().putString("selected_model", model.id).apply()
                                 showModelBottomSheet = false
                             },
-                        color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.2f) else Color(0xFF262626),
+                        color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.15f) else Color(0xFF222226),
                         shape = RoundedCornerShape(12.dp),
-                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF2563EB)) else null
+                        border = if (isSelected) BorderStroke(1.5.dp, Color(0xFF2563EB)) else BorderStroke(1.dp, Color(0xFF2A2A2E))
                     ) {
                         Row(
                             modifier = Modifier
@@ -332,20 +592,28 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = model.displayName,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.5.sp,
-                                        color = Color.White
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp,
+                                        color = if (model.isAvailable) Color.White else Color.Gray
                                     )
-                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
-                                        color = if (isSelected) Color(0xFF2563EB) else Color(0xFF374151),
-                                        shape = RoundedCornerShape(6.dp)
+                                        color = if (model.badge == "High" || model.badge == "Ultra Stable") Color(0xFF1E3A8A) else Color(0xFF2D3036),
+                                        shape = RoundedCornerShape(4.dp)
                                     ) {
                                         Text(
                                             text = model.badge,
-                                            fontSize = 10.sp,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            fontSize = 9.5.sp,
+                                            color = if (model.isAvailable) Color(0xFF93C5FD) else Color.LightGray,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                    if (model.tag.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = model.tag,
+                                            fontSize = 9.sp,
+                                            color = Color.Gray
                                         )
                                     }
                                 }
@@ -353,7 +621,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                 Text(
                                     text = model.description,
                                     fontSize = 11.sp,
-                                    color = Color.LightGray
+                                    color = if (model.isAvailable) Color(0xFFA1A1AA) else Color(0xFF52525B)
                                 )
                             }
                             if (isSelected) {
@@ -368,10 +636,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     }
                 }
 
-                HorizontalDivider(
-                    color = Color(0xFF333333),
-                    modifier = Modifier.padding(vertical = 12.dp)
-                )
+                HorizontalDivider(color = Color(0xFF2E3035), modifier = Modifier.padding(vertical = 12.dp))
 
                 // View Usage Link
                 Surface(
@@ -381,8 +646,9 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             showModelBottomSheet = false
                             showUsageDialog = true
                         },
-                    color = Color(0xFF2A2A2A),
-                    shape = RoundedCornerShape(12.dp)
+                    color = Color(0xFF222226),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF2E3035))
                 ) {
                     Row(
                         modifier = Modifier
@@ -394,21 +660,18 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.QueryStats, contentDescription = "Usage", tint = Color(0xFF38BDF8))
                             Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text("View Usage & Rate Limits", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                                Text("কোটা ও রিমেইনিং লিমিট দেখুন", color = Color.Gray, fontSize = 11.sp)
-                            }
+                            Text("View Usage & Rate Limits", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
                         }
                         Icon(Icons.Default.ChevronRight, contentDescription = "Open", tint = Color.LightGray)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(18.dp))
             }
         }
     }
 
-    // View Usage Dialog
+    // Antigravity Rate Limits Dialog
     if (showUsageDialog) {
         val stats: UsageStats = remember { apiClient.usageTracker.getUsageStats() }
         AlertDialog(
@@ -417,72 +680,73 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.QueryStats, contentDescription = null, tint = Color(0xFF38BDF8))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("API Usage & Rate Limits", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Text("Usage & Rate Limits", fontSize = 16.5.sp, fontWeight = FontWeight.Bold)
                 }
             },
             text = {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1E1E1E), shape = RoundedCornerShape(12.dp))
-                        .padding(12.dp)
+                        .background(Color(0xFF1E1F22), shape = RoundedCornerShape(14.dp))
+                        .padding(14.dp)
                 ) {
-                    Text(
-                        "Gemini Models",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                    Text("Gemini Models", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    AntigravityUsageRow(
+                        title = "Weekly limit",
+                        resetsIn = "6d 23h",
+                        percentLeft = 99
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    UsageLimitRow(
-                        title = "Daily limit",
-                        resetsIn = stats.dailyResetsIn,
-                        percentLeft = stats.dailyPercentLeft,
-                        used = stats.dailyUsed,
-                        total = stats.dailyLimit
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    UsageLimitRow(
-                        title = "5h rolling limit",
+                    AntigravityUsageRow(
+                        title = "5h limit",
                         resetsIn = stats.fiveHourResetsIn,
-                        percentLeft = stats.fiveHourPercentLeft,
-                        used = stats.fiveHourUsed,
-                        total = stats.fiveHourLimit
+                        percentLeft = stats.fiveHourPercentLeft
                     )
 
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color(0xFF2E3035))
                     Spacer(modifier = Modifier.height(14.dp))
-                    HorizontalDivider(color = Color(0xFF333333))
+
+                    Text("Claude and GPT models", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Total tokens used:", fontSize = 12.sp, color = Color.Gray)
-                        Text("${stats.totalTokens} tokens", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
-                    }
+                    AntigravityUsageRow(
+                        title = "Weekly limit",
+                        resetsIn = "1d 19h",
+                        percentLeft = 0
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    AntigravityUsageRow(
+                        title = "5h limit",
+                        resetsIn = "4h 59m",
+                        percentLeft = 100
+                    )
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showUsageDialog = false }) {
+                Button(
+                    onClick = { showUsageDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
                     Text("ঠিক আছে")
                 }
             },
-            containerColor = Color(0xFF181818)
+            containerColor = Color(0xFF18181B)
         )
     }
 
-    // Settings Dialog (With In-Settings Update Check)
+    // In-Settings Dialog
     if (showSettingsDialog) {
         var tempKey by remember { mutableStateOf(apiKey) }
         var tempRepo by remember { mutableStateOf(githubRepo) }
 
         AlertDialog(
             onDismissRequest = { if (apiKey.isNotEmpty()) showSettingsDialog = false },
-            title = { Text("এজেন্ট সেটিংস") },
+            title = { Text("এজেন্ট সেটিংস (Settings)", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
                     Text("১. Gemini API Key:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -493,8 +757,8 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("২. GitHub Repo (আপডেটের জন্য):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("২. GitHub Repo (OTA আপডেটের জন্য):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     OutlinedTextField(
                         value = tempRepo,
                         onValueChange = { tempRepo = it },
@@ -503,18 +767,18 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     HorizontalDivider(color = Color(0xFF333333))
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // IN-SETTINGS UPDATE SECTION
+                    // In-Settings Update Check
                     Text("৩. অ্যাপ ভার্সন ও আপডেট:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("বর্তমান ভার্সন: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
+                        Text("বর্তমান: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
 
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
@@ -555,7 +819,6 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         )
                     }
 
-                    // Download update button if available
                     availableUpdate?.let { update ->
                         Spacer(modifier = Modifier.height(8.dp))
                         if (isDownloadingUpdate) {
@@ -600,7 +863,8 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             .putString("github_repo", githubRepo)
                             .apply()
                         showSettingsDialog = false
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                 ) {
                     Text("সংরক্ষণ করুন")
                 }
@@ -611,18 +875,78 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         Text("বাতিল")
                     }
                 }
-            }
+            },
+            containerColor = Color(0xFF1E1E22)
         )
     }
 }
 
 @Composable
-fun UsageLimitRow(
+fun QuickActionItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
+        color = Color(0xFF242429),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF2563EB).copy(alpha = 0.2f),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                Text(subtitle, color = Color.Gray, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun AntigravityThinkingIndicator(modelName: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(16.dp),
+            strokeWidth = 2.dp,
+            color = Color(0xFF38BDF8)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = "$modelName চিন্তা করছে ও কাজ করছে...",
+            fontSize = 12.5.sp,
+            color = Color(0xFF94A3B8)
+        )
+    }
+}
+
+@Composable
+fun AntigravityUsageRow(
     title: String,
     resetsIn: String,
-    percentLeft: Int,
-    used: Int,
-    total: Int
+    percentLeft: Int
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -630,25 +954,24 @@ fun UsageLimitRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
-            Text(title, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
-            Text("Resets in $resetsIn", color = Color.Gray, fontSize = 11.5.sp)
-            Text("$used / $total requests", color = Color(0xFF6B7280), fontSize = 10.5.sp)
+            Text(title, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
+            Text("Resets in $resetsIn", color = Color(0xFF9CA3AF), fontSize = 11.5.sp)
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "$percentLeft% left",
-                color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFFF87171),
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
+                color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFF6B7280),
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.5.sp
             )
             Spacer(modifier = Modifier.width(8.dp))
             Box(contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
                     progress = { percentLeft / 100f },
-                    modifier = Modifier.size(24.dp),
-                    color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFFF87171),
-                    trackColor = Color(0xFF2A2A2A),
-                    strokeWidth = 3.dp
+                    modifier = Modifier.size(20.dp),
+                    color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFF4B5563),
+                    trackColor = Color(0xFF262626),
+                    strokeWidth = 2.5.dp
                 )
             }
         }
@@ -656,46 +979,220 @@ fun UsageLimitRow(
 }
 
 @Composable
-fun ChatBubble(msg: ChatMessage) {
+fun AntigravityChatBubble(msg: ChatMessage) {
     val isUser = msg.sender == MessageSender.USER
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var isToolsExpanded by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
-        if (!isUser && msg.toolLog != null) {
-            Surface(
-                color = Color(0xFF1E293B),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .padding(bottom = 4.dp)
+        // Agent Avatar / Sparkle Header
+        if (!isUser) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = 4.dp, start = 2.dp)
             ) {
+                Icon(
+                    Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
-                    text = "⚙️ Actions:\n${msg.toolLog}",
-                    color = Color(0xFF7DD3FC),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(8.dp)
+                    "Antigravity Agent",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
 
-        Surface(
-            color = if (isUser) Color(0xFF2563EB) else Color(0xFF242424),
-            shape = RoundedCornerShape(
-                topStart = 16.dp,
-                topEnd = 16.dp,
-                bottomStart = if (isUser) 16.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 16.dp
-            ),
-            modifier = Modifier.widthIn(max = 320.dp)
-        ) {
-            Text(
-                text = msg.text,
-                color = Color.White,
-                fontSize = 14.5.sp,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-            )
+        // Expandable Antigravity Tool Logs / Action Status Pill
+        if (!isUser && msg.toolLog != null) {
+            Surface(
+                color = Color(0xFF1E293B),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color(0xFF334155)),
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .padding(bottom = 6.dp)
+                    .clickable { isToolsExpanded = !isToolsExpanded }
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Terminal, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Tool Executions (${msg.toolLog.lines().size} actions)",
+                                color = Color(0xFF7DD3FC),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Icon(
+                            if (isToolsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    if (isToolsExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = Color(0xFF334155))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = msg.toolLog,
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 10.5.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        // Message Content Bubble
+        if (isUser) {
+            Surface(
+                color = Color(0xFF1E293B),
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, Color(0xFF334155)),
+                modifier = Modifier.widthIn(max = 310.dp)
+            ) {
+                Text(
+                    text = msg.text,
+                    color = Color.White,
+                    fontSize = 14.5.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                )
+            }
+        } else {
+            // Render Agent Response with Code Block Highlighting & Copy Buttons
+            val parsedBlocks = remember(msg.text) { parseMarkdownBlocks(msg.text) }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 8.dp)
+            ) {
+                parsedBlocks.forEach { block ->
+                    when (block) {
+                        is ContentBlock.TextBlock -> {
+                            Text(
+                                text = block.content,
+                                color = Color(0xFFE4E4E7),
+                                fontSize = 14.5.sp,
+                                lineHeight = 21.sp,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                        is ContentBlock.CodeBlock -> {
+                            Surface(
+                                color = Color(0xFF121316),
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Color(0xFF27272A)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 6.dp)
+                            ) {
+                                Column {
+                                    // Code Card Header with Language & Copy Button
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF1C1D21))
+                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = block.language.ifEmpty { "code" },
+                                            color = Color(0xFF94A3B8),
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .clickable {
+                                                    clipboardManager.setText(AnnotatedString(block.code))
+                                                    Toast.makeText(context, "কোড কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                                                }
+                                                .padding(4.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ContentCopy,
+                                                contentDescription = "Copy Code",
+                                                tint = Color(0xFF38BDF8),
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Copy", color = Color(0xFF38BDF8), fontSize = 11.sp)
+                                        }
+                                    }
+
+                                    // Code text
+                                    Text(
+                                        text = block.code,
+                                        color = Color(0xFFF1F5F9),
+                                        fontSize = 12.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(10.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+sealed class ContentBlock {
+    data class TextBlock(val content: String) : ContentBlock()
+    data class CodeBlock(val language: String, val code: String) : ContentBlock()
+}
+
+fun parseMarkdownBlocks(rawText: String): List<ContentBlock> {
+    val blocks = mutableListOf<ContentBlock>()
+    val codeFenceRegex = Regex("```([a-zA-Z0-9_+-]*)\\n([\\s\\S]*?)```")
+    var lastIndex = 0
+
+    codeFenceRegex.findAll(rawText).forEach { match ->
+        if (match.range.first > lastIndex) {
+            val textBefore = rawText.substring(lastIndex, match.range.first).trim()
+            if (textBefore.isNotEmpty()) {
+                blocks.add(ContentBlock.TextBlock(textBefore))
+            }
+        }
+        val lang = match.groupValues[1].trim()
+        val code = match.groupValues[2].trimEnd()
+        blocks.add(ContentBlock.CodeBlock(lang, code))
+        lastIndex = match.range.last + 1
+    }
+
+    if (lastIndex < rawText.length) {
+        val remaining = rawText.substring(lastIndex).trim()
+        if (remaining.isNotEmpty()) {
+            blocks.add(ContentBlock.TextBlock(remaining))
+        }
+    }
+
+    if (blocks.isEmpty() && rawText.isNotEmpty()) {
+        blocks.add(ContentBlock.TextBlock(rawText))
+    }
+
+    return blocks
 }

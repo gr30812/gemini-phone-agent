@@ -1,6 +1,6 @@
 {
-  "version_code": 6,
-  "version_name": "1.0.5",
+  "version_code": 7,
+  "version_name": "1.0.6",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "Pull-to-refresh animation, in-settings update checker, zero-downtime model fallback (Gemini 3.8 Flash, 3.5 Flash-Lite & 3.1 Pro)"
+  "changelog": "Antigravity UI design, floating prompt bar with +, model selector pill, voice command mic with live waveform, syntax code cards with 1-tap copy"
 }
