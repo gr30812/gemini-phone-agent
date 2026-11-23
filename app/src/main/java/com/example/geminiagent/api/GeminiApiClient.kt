@@ -208,7 +208,7 @@ class GeminiApiClient(private val context: Context) {
                         }
 
                         if (response.code == 503 || response.code == 429) {
-                            lastErrorMessage = "মডেল $model সার্ভার ব্যস্ত (${response.code})"
+                            lastErrorMessage = "Model $model server busy (${response.code})"
                             delay(1000)
                             continue
                         } else {
@@ -226,7 +226,7 @@ class GeminiApiClient(private val context: Context) {
 
             if (successResponse == null) {
                 return@withContext AgentResponse(
-                    "⚠️ দুঃখিত, রিকোয়েস্টটি সম্পন্ন করা যায়নি। $lastErrorMessage\nঅনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।",
+                    "⚠️ Request could not be completed. $lastErrorMessage\nPlease try again in a few seconds.",
                     logs
                 )
             }

@@ -61,12 +61,12 @@ data class ModelOption(
 )
 
 val ANTIGRAVITY_MODELS = listOf(
-    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High", "Recommended", "গুগলের ফ্ল্যাগশিপ লেটেস্ট হাই-স্পিড এজেন্ট মডেল"),
-    ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Ultra Stable", "Fast", "জিরো ডাউনটাইম ও উচ্চ স্থিতিশীলতার লাইট মডেল"),
-    ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro (Thinking)", "Deep Thinking", "Preview", "জটিল কোডিং, মাল্টি-ফাইল রিফ্যাক্টরিং ও যুক্তি বিশ্লেষণ"),
-    ModelOption("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)", "Notice", "Alternative", "ক্লড সনেট কোডিং ইঞ্জিন", isAvailable = false),
-    ModelOption("gpt-oss-120b", "GPT-OSS 120B (Medium)", "Notice", "Alternative", "ওপেন সোর্স হাইব্রিড মডেল", isAvailable = false),
-    ModelOption("gemini-4-carbon", "Gemini 4 Carbon", "Unavailable", "Next-Gen", "আপকামিং নেক্সট-জেন মডেল", isAvailable = false)
+    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High", "Recommended", "Google's flagship latest high-speed agent model"),
+    ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Ultra Stable", "Fast", "Ultra-stable lightweight model with zero downtime"),
+    ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro (Thinking)", "Deep Thinking", "Preview", "Complex coding, multi-file refactoring and deep reasoning"),
+    ModelOption("claude-sonnet-4-6", "Claude Sonnet 4.6 (Thinking)", "Notice", "Alternative", "Claude Sonnet coding engine", isAvailable = false),
+    ModelOption("gpt-oss-120b", "GPT-OSS 120B (Medium)", "Notice", "Alternative", "Open-source hybrid reasoning model", isAvailable = false),
+    ModelOption("gemini-4-carbon", "Gemini 4 Carbon", "Unavailable", "Next-Gen", "Upcoming next-gen multimodal model", isAvailable = false)
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
@@ -101,7 +101,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     val initialMessage = ChatMessage(
         sender = MessageSender.AGENT,
-        text = "স্বাগতম! আমি আপনার নিজস্ব মোবাইল Antigravity এআই এজেন্ট। আমি ব্যাকগ্রাউন্ডে সক্রিয় আছি। কোড লিখতে, ফাইল তৈরি করতে, টার্মিনাল কমান্ড চালাতে বা ভয়েস দিয়ে নির্দেশ দিতে পারেন।"
+        text = "Welcome! I am your personal mobile Antigravity AI Agent running persistently in the background. Ask me to write code, manage files, run shell commands, or give voice instructions."
     )
     var messages by remember { mutableStateOf(listOf(initialMessage)) }
 
@@ -151,7 +151,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 }
             }
         } else {
-            Toast.makeText(context, "ভয়েস কমান্ড ব্যবহার করতে মাইক্রোফোন পারমিশন প্রয়োজন", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Microphone permission is required for voice commands", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -236,7 +236,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     IconButton(onClick = {
                         apiClient.clearHistory()
                         messages = listOf(initialMessage)
-                        Toast.makeText(context, "চ্যাট হিস্ট্রি ক্লিয়ার করা হয়েছে", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Chat history cleared", Toast.LENGTH_SHORT).show()
                     }) {
                         Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.LightGray)
                     }
@@ -322,7 +322,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("শুনছি... (কথা বলুন)", color = Color(0xFFFCA5A5), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Listening... (Speak your command)", color = Color(0xFFFCA5A5), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             if (partialSpeech.isNotEmpty()) {
                                 Text(partialSpeech, color = Color.White, fontSize = 13.5.sp)
                             }
@@ -520,23 +520,23 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 Text("Quick Actions & Commands", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 Spacer(modifier = Modifier.height(14.dp))
 
-                QuickActionItem(icon = Icons.Default.Mic, title = "Voice Command (ভয়েস নির্দেশ দিন)", subtitle = "মাইক্রোফোনে কথা বলে কোড বা নির্দেশ দিন") {
+                QuickActionItem(icon = Icons.Default.Mic, title = "Voice Command", subtitle = "Speak voice instructions to generate code or tasks") {
                     showQuickActionsSheet = false
                     toggleVoiceListening()
                 }
-                QuickActionItem(icon = Icons.Default.Folder, title = "List Workspace Files", subtitle = "ওয়ার্কস্পেসের ফাইলগুলো দেখুন (/list_files)") {
+                QuickActionItem(icon = Icons.Default.Folder, title = "List Workspace Files", subtitle = "View all files in agent workspace (/list_files)") {
                     showQuickActionsSheet = false
-                    doSendMessage("workspace এ কী কী ফাইল আছে তালিকা দেখাও")
+                    doSendMessage("List all files currently in the workspace")
                 }
-                QuickActionItem(icon = Icons.Default.Terminal, title = "Execute Shell Command", subtitle = "টার্মিনাল বা শেল কমান্ড চালান") {
+                QuickActionItem(icon = Icons.Default.Terminal, title = "Execute Shell Command", subtitle = "Run a terminal shell command") {
                     showQuickActionsSheet = false
                     inputText = "execute_command: ls -la"
                 }
-                QuickActionItem(icon = Icons.Default.QueryStats, title = "View Usage & Rate Limits", subtitle = "দৈনিক এবং ৫-ঘণ্টার কোটা সীমা দেখুন") {
+                QuickActionItem(icon = Icons.Default.QueryStats, title = "View Usage & Rate Limits", subtitle = "Check 5h rolling & daily API quotas") {
                     showQuickActionsSheet = false
                     showUsageDialog = true
                 }
-                QuickActionItem(icon = Icons.Default.Settings, title = "Agent Settings", subtitle = "API Key এবং OTA আপডেট সেটিংস") {
+                QuickActionItem(icon = Icons.Default.Settings, title = "Agent Settings", subtitle = "Configure API Key and OTA updates") {
                     showQuickActionsSheet = false
                     showSettingsDialog = true
                 }
@@ -732,7 +732,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     onClick = { showUsageDialog = false },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                 ) {
-                    Text("ঠিক আছে")
+                    Text("Close")
                 }
             },
             containerColor = Color(0xFF18181B)
@@ -746,10 +746,10 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
         AlertDialog(
             onDismissRequest = { if (apiKey.isNotEmpty()) showSettingsDialog = false },
-            title = { Text("এজেন্ট সেটিংস (Settings)", fontWeight = FontWeight.Bold) },
+            title = { Text("Agent Settings", fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("১. Gemini API Key:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("1. Gemini API Key:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     OutlinedTextField(
                         value = tempKey,
                         onValueChange = { tempKey = it },
@@ -758,7 +758,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text("২. GitHub Repo (OTA আপডেটের জন্য):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("2. GitHub Repo (for OTA Updates):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     OutlinedTextField(
                         value = tempRepo,
                         onValueChange = { tempRepo = it },
@@ -772,13 +772,13 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // In-Settings Update Check
-                    Text("৩. অ্যাপ ভার্সন ও আপডেট:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("3. App Version & Updates:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("বর্তমান: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
+                        Text("Current: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
 
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
@@ -794,9 +794,9 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                         isCheckingUpdate = false
                                         if (update != null) {
                                             availableUpdate = update
-                                            updateCheckResultText = "🚀 নতুন আপডেট পাওয়া গেছে (${update.versionName})!"
+                                            updateCheckResultText = "🚀 New update available (${update.versionName})!"
                                         } else {
-                                            updateCheckResultText = "✅ আপনার অ্যাপটি সর্বশেষ ভার্সনে আছে!"
+                                            updateCheckResultText = "✅ Your app is up to date!"
                                         }
                                     }
                                 },
@@ -828,7 +828,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                     modifier = Modifier.fillMaxWidth(),
                                     color = Color(0xFF2563EB)
                                 )
-                                Text("ডাউনলোড হচ্ছে: ${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color.Gray)
+                                Text("Downloading: ${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color.Gray)
                             }
                         } else {
                             Button(
@@ -847,7 +847,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             ) {
                                 Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("এখনই আপডেট করুন (${update.versionName})")
+                                Text("Update Now (${update.versionName})")
                             }
                         }
                     }
@@ -866,13 +866,13 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                 ) {
-                    Text("সংরক্ষণ করুন")
+                    Text("Save Settings")
                 }
             },
             dismissButton = {
                 if (apiKey.isNotEmpty()) {
                     TextButton(onClick = { showSettingsDialog = false }) {
-                        Text("বাতিল")
+                        Text("Cancel")
                     }
                 }
             },
@@ -935,7 +935,7 @@ fun AntigravityThinkingIndicator(modelName: String) {
         )
         Spacer(modifier = Modifier.width(10.dp))
         Text(
-            text = "$modelName চিন্তা করছে ও কাজ করছে...",
+            text = "$modelName is thinking and executing...",
             fontSize = 12.5.sp,
             color = Color(0xFF94A3B8)
         )
@@ -1126,7 +1126,7 @@ fun AntigravityChatBubble(msg: ChatMessage) {
                                             modifier = Modifier
                                                 .clickable {
                                                     clipboardManager.setText(AnnotatedString(block.code))
-                                                    Toast.makeText(context, "কোড কপি করা হয়েছে!", Toast.LENGTH_SHORT).show()
+                                                    Toast.makeText(context, "Code copied to clipboard!", Toast.LENGTH_SHORT).show()
                                                 }
                                                 .padding(4.dp),
                                             verticalAlignment = Alignment.CenterVertically
