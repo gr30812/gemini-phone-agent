@@ -2,6 +2,7 @@ package com.example.geminiagent.ui
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,9 +10,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,16 +30,33 @@ import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import kotlinx.coroutines.launch
 
+data class ModelOption(
+    val id: String,
+    val displayName: String,
+    val badge: String,
+    val description: String
+)
+
+val AVAILABLE_MODELS = listOf(
+    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High Speed", "গুগলের সবচেয়ে দ্রুত ও লেটেস্ট মডেল"),
+    ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Balanced", "দ্রুত এবং নিখুঁত পারফরম্যান্স"),
+    ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Deep Thinking", "জটিল কোডিং এবং গভীর যুক্তি বিশ্লেষণ"),
+    ModelOption("gemini-1.5-pro", "Gemini 1.5 Pro", "Stable", "অত্যন্ত নির্ভরযোগ্য ও দীর্ঘ কনটেক্সট")
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AgentChatScreen(apiClient: GeminiApiClient) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("agent_prefs", Context.MODE_PRIVATE) }
     var apiKey by remember { mutableStateOf(prefs.getString("api_key", "") ?: "") }
-    var githubRepo by remember {
-        mutableStateOf(prefs.getString("github_repo", "") ?: "")
+    var githubRepo by remember { mutableStateOf(prefs.getString("github_repo", "") ?: "") }
+    var selectedModel by remember {
+        mutableStateOf(prefs.getString("selected_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
     }
+
     var showSettingsDialog by remember { mutableStateOf(apiKey.isEmpty()) }
+    var showModelBottomSheet by remember { mutableStateOf(false) }
 
     val updater = remember { AppUpdater(context) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -72,13 +90,40 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         }
     }
 
+    val currentModelOption = AVAILABLE_MODELS.find { it.id == selectedModel } ?: AVAILABLE_MODELS[0]
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text("Gemini Phone Agent", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Background Active • gemini-3.8-flash", fontSize = 11.sp, color = Color(0xFF4ADE80))
+                        Text("Gemini Phone Agent", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        // Clickable Model Selector Chip
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clickable { showModelBottomSheet = true }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Text(
+                                "⚡ ${currentModelOption.displayName}",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF38BDF8),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = "Select Model",
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "• Background Active",
+                                fontSize = 10.5.sp,
+                                color = Color(0xFF4ADE80)
+                            )
+                        }
                     }
                 },
                 actions = {
@@ -177,7 +222,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
                             Spacer(modifier = Modifier.width(10.dp))
-                            Text("Agent কাজ করছে...", fontSize = 13.sp, color = Color.Gray)
+                            Text("${currentModelOption.displayName} কাজ করছে...", fontSize = 13.sp, color = Color.Gray)
                         }
                     }
                 }
@@ -228,7 +273,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
                                 scope.launch {
                                     listState.animateScrollToItem(messages.size - 1)
-                                    val response = apiClient.sendMessage(apiKey, prompt)
+                                    val response = apiClient.sendMessage(apiKey, prompt, selectedModel)
                                     val toolLogs = if (response.logs.isNotEmpty()) response.logs.joinToString("\n") else null
                                     val agentMsg = ChatMessage(
                                         sender = MessageSender.AGENT,
@@ -256,6 +301,98 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         }
     }
 
+    // Model Selector BottomSheet
+    if (showModelBottomSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showModelBottomSheet = false },
+            containerColor = Color(0xFF1E1E1E),
+            scrimColor = Color.Black.copy(alpha = 0.6f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "মডেল নির্বাচন করুন (Model Picker)",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Text(
+                    text = "আপনার কাজের ধরন অনুযায়ী মডেল সিলেক্ট করুন:",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 14.dp)
+                )
+
+                AVAILABLE_MODELS.forEach { model ->
+                    val isSelected = model.id == selectedModel
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp)
+                            .clickable {
+                                selectedModel = model.id
+                                prefs.edit().putString("selected_model", model.id).apply()
+                                showModelBottomSheet = false
+                            },
+                        color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.2f) else Color(0xFF262626),
+                        shape = RoundedCornerShape(12.dp),
+                        border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF2563EB)) else null
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = model.displayName,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.5.sp,
+                                        color = Color.White
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        color = if (isSelected) Color(0xFF2563EB) else Color(0xFF374151),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = model.badge,
+                                            fontSize = 10.sp,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = model.description,
+                                    fontSize = 11.5.sp,
+                                    color = Color.LightGray
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // Settings Dialog
     if (showSettingsDialog) {
         var tempKey by remember { mutableStateOf(apiKey) }
         var tempRepo by remember { mutableStateOf(githubRepo) }
@@ -279,7 +416,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     OutlinedTextField(
                         value = tempRepo,
                         onValueChange = { tempRepo = it },
-                        placeholder = { Text("username/gemini-phone-agent") },
+                        placeholder = { Text("gr30812/gemini-phone-agent") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

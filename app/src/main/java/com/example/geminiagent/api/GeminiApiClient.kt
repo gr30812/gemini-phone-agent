@@ -23,9 +23,6 @@ class GeminiApiClient(private val context: Context) {
     private val workspaceDir: File = File(context.filesDir, "workspace").apply { mkdirs() }
     private val history = JSONArray()
 
-    // Available models with fallback
-    private val availableModels = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro")
-
     private fun safePath(path: String): File {
         val target = File(workspaceDir, path).canonicalFile
         if (!target.path.startsWith(workspaceDir.canonicalPath)) {
@@ -111,13 +108,25 @@ class GeminiApiClient(private val context: Context) {
         val logs: List<String>
     )
 
-    suspend fun sendMessage(apiKey: String, userText: String): AgentResponse = withContext(Dispatchers.IO) {
+    suspend fun sendMessage(
+        apiKey: String,
+        userText: String,
+        selectedModel: String = "gemini-3.8-flash"
+    ): AgentResponse = withContext(Dispatchers.IO) {
         val logs = mutableListOf<String>()
         val userTurn = JSONObject().apply {
             put("role", "user")
             put("parts", JSONArray().put(JSONObject().put("text", userText)))
         }
         history.put(userTurn)
+
+        // Prioritize the user-selected model, followed by fallbacks
+        val modelsToTry = buildList {
+            add(selectedModel)
+            if (selectedModel != "gemini-3.8-flash") add("gemini-3.8-flash")
+            if (selectedModel != "gemini-2.5-flash") add("gemini-2.5-flash")
+            if (selectedModel != "gemini-2.5-pro") add("gemini-2.5-pro")
+        }.distinct()
 
         var finalReply = ""
 
@@ -130,8 +139,7 @@ class GeminiApiClient(private val context: Context) {
             var successResponse: JSONObject? = null
             var lastErrorMessage = ""
 
-            // Loop through models and retries for 503 / 429 resilience
-            modelLoop@ for (model in availableModels) {
+            modelLoop@ for (model in modelsToTry) {
                 val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
                 for (attempt in 1..2) {
@@ -150,8 +158,8 @@ class GeminiApiClient(private val context: Context) {
                         }
 
                         if (response.code == 503 || response.code == 429) {
-                            lastErrorMessage = "Google server is experiencing high demand (${response.code})."
-                            delay(1500) // Wait 1.5 seconds and retry
+                            lastErrorMessage = "Model $model experiencing high demand (${response.code})."
+                            delay(1500)
                             continue
                         } else {
                             lastErrorMessage = "Error ${response.code}: $responseBody"
@@ -166,7 +174,7 @@ class GeminiApiClient(private val context: Context) {
 
             if (successResponse == null) {
                 return@withContext AgentResponse(
-                    "⚠️ গুগল সার্ভারে এই মুহূর্তে ট্রাফিকের কারণে লোড বেশি রয়েছে। অনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।\n($lastErrorMessage)",
+                    "⚠️ সার্ভারে লোড বেশি থাকায় উত্তর পাওয়া যায়নি। কয়েক সেকেন্ড পর আবার চেষ্টা করুন।\n($lastErrorMessage)",
                     logs
                 )
             }
