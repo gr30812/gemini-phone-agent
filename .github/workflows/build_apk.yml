@@ -1,0 +1,56 @@
+name: Build & Release Phone Agent APK
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Make Gradlew Executable
+        run: chmod +x ./gradlew
+
+      - name: Build APK with Gradle
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Prepare APK for Release
+        run: |
+          mkdir -p release_assets
+          cp app/build/outputs/apk/debug/app-debug.apk release_assets/GeminiAgent.apk
+          cp version.json release_assets/version.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        with:
+          tag_name: latest
+          name: "Latest Phone Agent Update"
+          body: "Automated build from commit ${{ github.sha }}. Check version.json for changelog."
+          files: |
+            release_assets/GeminiAgent.apk
+            release_assets/version.json
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

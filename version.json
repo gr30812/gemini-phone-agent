@@ -1,0 +1,6 @@
+{
+  "version_code": 1,
+  "version_name": "1.0.0",
+  "apk_url": "https://github.com/USER/gemini-phone-agent/releases/latest/download/GeminiAgent.apk",
+  "changelog": "Initial release with background service and tool support"
+}
