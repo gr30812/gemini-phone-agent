@@ -116,6 +116,16 @@ class AppUpdater(private val context: Context) {
 
             // Launch system package installer on Main thread
             withContext(Dispatchers.Main) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    if (!context.packageManager.canRequestPackageInstalls()) {
+                        val settingsIntent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                            data = android.net.Uri.parse("package:${context.packageName}")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(settingsIntent)
+                        return@withContext
+                    }
+                }
                 val apkUri = FileProvider.getUriForFile(
                     context,
                     "${context.packageName}.provider",

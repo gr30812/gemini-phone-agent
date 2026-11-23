@@ -25,8 +25,8 @@ class GeminiApiClient(private val context: Context) {
     private val history = JSONArray()
     val usageTracker = UsageTracker(context)
 
-    // Available models with fallback
-    private val availableModels = listOf("gemini-2.5-flash", "gemini-3.8-flash", "gemini-2.5-pro")
+    // Current active models with zero downtime fallback
+    private val activeModels = listOf("gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview")
 
     private fun safePath(path: String): File {
         val target = File(workspaceDir, path).canonicalFile
@@ -161,7 +161,7 @@ class GeminiApiClient(private val context: Context) {
     suspend fun sendMessage(
         apiKey: String,
         userText: String,
-        selectedModel: String = "gemini-2.5-flash"
+        selectedModel: String = "gemini-3.8-flash"
     ): AgentResponse = withContext(Dispatchers.IO) {
         val logs = mutableListOf<String>()
         val userTurn = JSONObject().apply {
@@ -170,12 +170,12 @@ class GeminiApiClient(private val context: Context) {
         }
         history.put(userTurn)
 
-        // Try selected model first, then fallback models
+        // Try selected model first, then active fallback
         val modelsToTry = buildList {
             add(selectedModel)
-            if (selectedModel != "gemini-2.5-flash") add("gemini-2.5-flash")
-            if (selectedModel != "gemini-3.8-flash") add("gemini-3.8-flash")
-            if (selectedModel != "gemini-2.5-pro") add("gemini-2.5-pro")
+            for (m in activeModels) {
+                if (m != selectedModel) add(m)
+            }
         }.distinct()
 
         var finalReply = ""
@@ -215,7 +215,7 @@ class GeminiApiClient(private val context: Context) {
                             val errJson = try { JSONObject(responseBody).optJSONObject("error") } catch (e: Exception) { null }
                             val msg = errJson?.optString("message") ?: responseBody
                             lastErrorMessage = "Error ${response.code}: $msg"
-                            break
+                            break // Try next active model
                         }
                     } catch (e: Exception) {
                         lastErrorMessage = "Connection error: ${e.message}"
@@ -231,7 +231,6 @@ class GeminiApiClient(private val context: Context) {
                 )
             }
 
-            // Record usage tokens and request stats
             val usageMeta = successResponse.optJSONObject("usageMetadata")
             val tokens = usageMeta?.optLong("totalTokenCount", 0L) ?: 0L
             usageTracker.recordRequest(tokens)

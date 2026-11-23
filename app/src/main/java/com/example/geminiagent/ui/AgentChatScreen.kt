@@ -49,10 +49,9 @@ data class ModelOption(
 )
 
 val AVAILABLE_MODELS = listOf(
-    ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Most Stable", "দ্রুততম এবং সবচেয়ে স্থিতিশীল মডেল"),
-    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High Speed", "গুগলের লেটেস্ট হাই-স্পিড মডেল"),
-    ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Deep Thinking", "জটিল কোডিং এবং গভীর যুক্তি বিশ্লেষণ"),
-    ModelOption("gemini-1.5-pro", "Gemini 1.5 Pro", "Stable", "অত্যন্ত নির্ভরযোগ্য ও দীর্ঘ কনটেক্সট")
+    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "Recommended", "গুগলের অফিশিয়াল ফ্ল্যাগশিপ হাই-স্পিড মডেল"),
+    ModelOption("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Ultra Stable", "দ্রুততম ও সবচেয়ে স্থিতিশীল মডেল (নো ডাউনটাইম)"),
+    ModelOption("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "Deep Thinking", "গুগলের শক্তিশালী প্রো মডেল (জটিল কোডিং ও যুক্তি)")
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
@@ -63,7 +62,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     var apiKey by remember { mutableStateOf(prefs.getString("api_key", "") ?: "") }
     var githubRepo by remember { mutableStateOf(prefs.getString("github_repo", "gr30812/gemini-phone-agent") ?: "gr30812/gemini-phone-agent") }
     var selectedModel by remember {
-        mutableStateOf(prefs.getString("selected_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
+        mutableStateOf(prefs.getString("selected_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
     }
 
     var showSettingsDialog by remember { mutableStateOf(apiKey.isEmpty()) }
@@ -96,10 +95,9 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
             isRefreshing = true
             scope.launch {
                 delay(400)
-                if (githubRepo.isNotEmpty()) {
-                    val rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/version.json"
-                    availableUpdate = updater.checkUpdate(rawUrl)
-                }
+                val repoName = githubRepo.trim().ifBlank { "gr30812/gemini-phone-agent" }
+                val rawUrl = "https://raw.githubusercontent.com/$repoName/main/version.json"
+                availableUpdate = updater.checkUpdate(rawUrl)
                 delay(300)
                 isRefreshing = false
             }
@@ -526,7 +524,8 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                     isCheckingUpdate = true
                                     updateCheckResultText = null
                                     scope.launch {
-                                        val rawUrl = "https://raw.githubusercontent.com/$tempRepo/main/version.json"
+                                        val repoName = tempRepo.trim().ifBlank { "gr30812/gemini-phone-agent" }
+                                        val rawUrl = "https://raw.githubusercontent.com/$repoName/main/version.json"
                                         val update = updater.checkUpdate(rawUrl)
                                         isCheckingUpdate = false
                                         if (update != null) {
