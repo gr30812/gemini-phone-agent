@@ -1,10 +1,18 @@
 package com.example.geminiagent.api
 
 import android.content.Context
+import com.example.geminiagent.artifacts.AgentArtifact
+import com.example.geminiagent.artifacts.ArtifactManager
+import com.example.geminiagent.automation.AutomationManager
+import com.example.geminiagent.knowledge.KnowledgeBaseManager
 import com.example.geminiagent.os.AgentAccessibilityService
 import com.example.geminiagent.os.AgentNotificationListenerService
 import com.example.geminiagent.os.DeviceBridge
 import com.example.geminiagent.os.ShizukuBridge
+import com.example.geminiagent.skills.AntigravitySdkBridge
+import com.example.geminiagent.skills.GoogleServicesBridge
+import com.example.geminiagent.skills.SkillsEngine
+import com.example.geminiagent.swarm.SwarmCoordinator
 import com.example.geminiagent.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -367,6 +375,186 @@ class GeminiApiClient(private val context: Context) {
             })
         })
 
+        // 18. schedule_automation
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "schedule_automation")
+            put("description", "Schedules an autonomous background task to run periodically using Android AlarmManager (e.g. every 60 minutes summarize notifications).")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("name", JSONObject().apply { put("type", "STRING"); put("description", "Name of the automation") })
+                    put("interval_minutes", JSONObject().apply { put("type", "INTEGER"); put("description", "Interval in minutes (min 5)") })
+                    put("prompt", JSONObject().apply { put("type", "STRING"); put("description", "Task instruction prompt to execute") })
+                })
+                put("required", JSONArray().put("name").put("interval_minutes").put("prompt"))
+            })
+        })
+
+        // 19. cancel_automation
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "cancel_automation")
+            put("description", "Cancels an existing scheduled background automation by ID.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("automation_id", JSONObject().apply { put("type", "STRING"); put("description", "ID of the automation to cancel") })
+                })
+                put("required", JSONArray().put("automation_id"))
+            })
+        })
+
+        // 20. save_knowledge
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "save_knowledge")
+            put("description", "Stores long-term facts, rules, user preferences, code snippets or documentation into the Knowledge Base.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("title", JSONObject().apply { put("type", "STRING"); put("description", "Knowledge title or topic") })
+                    put("content", JSONObject().apply { put("type", "STRING"); put("description", "Detailed information to remember") })
+                    put("tags", JSONObject().apply { put("type", "STRING"); put("description", "Comma-separated search tags") })
+                })
+                put("required", JSONArray().put("title").put("content"))
+            })
+        })
+
+        // 21. query_knowledge
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "query_knowledge")
+            put("description", "Searches the long-term Knowledge Base memory for notes, facts, and documentation.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("query", JSONObject().apply { put("type", "STRING"); put("description", "Search keywords or topic") })
+                })
+                put("required", JSONArray().put("query"))
+            })
+        })
+
+        // 22. create_artifact
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "create_artifact")
+            put("description", "Creates an interactive Markdown Artifact (e.g. Execution Plan, Architecture Document, Code) with Direct Feedback buttons (Proceed/Approve/Reject).")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("title", JSONObject().apply { put("type", "STRING"); put("description", "Artifact title") })
+                    put("summary", JSONObject().apply { put("type", "STRING"); put("description", "Short summary") })
+                    put("content", JSONObject().apply { put("type", "STRING"); put("description", "Markdown content with checkboxes and phases") })
+                    put("requires_feedback", JSONObject().apply { put("type", "BOOLEAN"); put("description", "Whether direct feedback buttons are shown") })
+                })
+                put("required", JSONArray().put("title").put("summary").put("content"))
+            })
+        })
+
+        // 23. maps_search
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "maps_search")
+            put("description", "Google Maps Official Skill: Search places, stores, or addresses on Google Maps.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("query", JSONObject().apply { put("type", "STRING"); put("description", "Place name or address to search") })
+                })
+                put("required", JSONArray().put("query"))
+            })
+        })
+
+        // 24. maps_directions
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "maps_directions")
+            put("description", "Google Maps Official Skill: Launches turn-by-turn navigation to a destination.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("destination", JSONObject().apply { put("type", "STRING"); put("description", "Destination address or coordinates") })
+                    put("mode", JSONObject().apply { put("type", "STRING"); put("description", "'d' for driving, 'w' for walking, 't' for transit") })
+                })
+                put("required", JSONArray().put("destination"))
+            })
+        })
+
+        // 25. maps_location
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "maps_location")
+            put("description", "Google Maps Official Skill: Gets current GPS coordinates and geocoded street address.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        })
+
+        // 26. firebase_query
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "firebase_query")
+            put("description", "Firebase Official Skill: Queries data from a Firebase Realtime Database via REST endpoint.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("database_url", JSONObject().apply { put("type", "STRING"); put("description", "Firebase database URL") })
+                    put("path", JSONObject().apply { put("type", "STRING"); put("description", "Database path or collection") })
+                })
+                put("required", JSONArray().put("database_url").put("path"))
+            })
+        })
+
+        // 27. gcloud_status
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "gcloud_status")
+            put("description", "Google Cloud Official Skill: Checks resource, service, and API health status for a GCP project.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("service_name", JSONObject().apply { put("type", "STRING"); put("description", "GCP service name (e.g. Cloud Run, Compute Engine)") })
+                    put("project_id", JSONObject().apply { put("type", "STRING"); put("description", "Google Cloud project ID") })
+                })
+                put("required", JSONArray().put("service_name").put("project_id"))
+            })
+        })
+
+        // 28. run_antigravity_sdk_script
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "run_antigravity_sdk_script")
+            put("description", "Antigravity SDK Python Runner: Executes a Python workflow or SDK script locally.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("python_code", JSONObject().apply { put("type", "STRING"); put("description", "Complete Python code to execute") })
+                })
+                put("required", JSONArray().put("python_code"))
+            })
+        })
+
+        // 29. swarm_spawn_worker
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "swarm_spawn_worker")
+            put("description", "Spawns a specialized parallel subagent worker in the active Swarm / Agent Team.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("name", JSONObject().apply { put("type", "STRING"); put("description", "Worker identifier") })
+                    put("role", JSONObject().apply { put("type", "STRING"); put("description", "Worker role (e.g. Researcher, Builder, Reviewer)") })
+                    put("task", JSONObject().apply { put("type", "STRING"); put("description", "Subtask assignment") })
+                })
+                put("required", JSONArray().put("name").put("role"))
+            })
+        })
+
+        // 30. mcp_call_tool
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "mcp_call_tool")
+            put("description", "Calls a tool on an external MCP (Model Context Protocol) server or local plugin.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("server_name", JSONObject().apply { put("type", "STRING"); put("description", "MCP server name") })
+                    put("tool_name", JSONObject().apply { put("type", "STRING"); put("description", "Tool identifier") })
+                    put("arguments", JSONObject().apply { put("type", "STRING"); put("description", "Arguments JSON payload") })
+                })
+                put("required", JSONArray().put("server_name").put("tool_name"))
+            })
+        })
+
         toolObject.put("functionDeclarations", funcDeclarations)
         toolsArray.put(toolObject)
         return toolsArray
@@ -374,7 +562,9 @@ class GeminiApiClient(private val context: Context) {
 
     data class AgentResponse(
         val text: String,
-        val logs: List<String>
+        val logs: List<String>,
+        val thinkingText: String? = null,
+        val artifact: AgentArtifact? = null
     )
 
     fun clearHistory() {
@@ -386,7 +576,8 @@ class GeminiApiClient(private val context: Context) {
     suspend fun sendMessage(
         apiKey: String,
         userText: String,
-        selectedModel: String = "gemini-3.8-flash"
+        selectedModel: String = "gemini-3.8-flash",
+        thinkingBudget: Int = 0
     ): AgentResponse = withContext(Dispatchers.IO) {
         val logs = mutableListOf<String>()
         val userTurn = JSONObject().apply {
@@ -404,6 +595,13 @@ class GeminiApiClient(private val context: Context) {
         }.distinct()
 
         var finalReply = ""
+        var accumulatedThinking: String? = null
+        var createdArtifact: AgentArtifact? = null
+
+        // Knowledge Base Context & Skills Discovery
+        val knowledgeContext = KnowledgeBaseManager.getKnowledgeContext(context, userText)
+        val skillsContext = SkillsEngine.getSkillsContextPrompt(context)
+        val swarmOverview = SwarmCoordinator.getSwarmOverview()
 
         // Antigravity System Instruction (Zero-Confirmation Autonomous Mode)
         val sysInstruction = JSONObject().apply {
@@ -417,7 +615,8 @@ class GeminiApiClient(private val context: Context) {
                         "You can inspect the screen with 'read_screen_content', tap on elements with 'click_screen_element', and navigate with 'perform_device_action'. " +
                         "You can open apps with 'open_app', lookup contacts with 'read_contacts', make calls with 'make_phone_call', read and send SMS with 'read_recent_sms' and 'send_sms', set alarms with 'set_alarm', and check battery/RAM with 'get_device_status'. " +
                         "You can also run elevated ADB shell commands without root via Shizuku using 'execute_adb_command' (e.g. precise screen taps 'input tap x y', swipes, hardware key events, screenshots, package management 'pm', and activity manager 'am'). " +
-                        "You can also write and execute scripts with 'read_file', 'write_file', 'list_files', and 'execute_command'. " +
+                        "You have full access to Knowledge Base ('save_knowledge', 'query_knowledge'), Scheduled Background Automations ('schedule_automation', 'cancel_automation'), Interactive Artifacts with Direct Feedback ('create_artifact'), Google Maps ('maps_search', 'maps_directions', 'maps_location'), Firebase ('firebase_query'), Google Cloud ('gcloud_status'), Antigravity SDK Python Runner ('run_antigravity_sdk_script'), and Parallel Swarms ('swarm_spawn_worker'). " +
+                        "$knowledgeContext\n$skillsContext\n[SWARM STATUS]: $swarmOverview\n" +
                         "Always execute tools directly without hesitation.")
             }))
         }
@@ -427,6 +626,13 @@ class GeminiApiClient(private val context: Context) {
                 put("contents", history)
                 put("tools", getToolsDefinition())
                 put("system_instruction", sysInstruction)
+                if (thinkingBudget > 0) {
+                    put("generationConfig", JSONObject().apply {
+                        put("thinking_config", JSONObject().apply {
+                            put("thinking_budget", thinkingBudget)
+                        })
+                    })
+                }
             }
 
             var successResponse: JSONObject? = null
@@ -480,7 +686,7 @@ class GeminiApiClient(private val context: Context) {
 
             val candidates = successResponse.optJSONArray("candidates")
             if (candidates == null || candidates.length() == 0) {
-                return@withContext AgentResponse("No response received from Gemini.", logs)
+                return@withContext AgentResponse("No response received from Gemini.", logs, accumulatedThinking, createdArtifact)
             }
 
             val firstCandidate = candidates.getJSONObject(0)
@@ -490,7 +696,10 @@ class GeminiApiClient(private val context: Context) {
             var functionCallObj: JSONObject? = null
             for (i in 0 until parts.length()) {
                 val part = parts.getJSONObject(i)
-                if (part.has("text")) {
+                if (part.optBoolean("thought", false)) {
+                    val t = part.optString("text", "")
+                    accumulatedThinking = (accumulatedThinking ?: "") + t
+                } else if (part.has("text")) {
                     finalReply += part.getString("text")
                 }
                 if (part.has("functionCall")) {
@@ -629,6 +838,89 @@ class GeminiApiClient(private val context: Context) {
                     logs.add("Executing ADB command via Shizuku: $cmd")
                     ShizukuBridge.executeAdbCommand(cmd)
                 }
+                "schedule_automation" -> {
+                    val name = fnArgs.optString("name", "Automation")
+                    val interval = fnArgs.optInt("interval_minutes", 60)
+                    val prompt = fnArgs.optString("prompt", "")
+                    logs.add("Scheduling automation: $name every ${interval}m")
+                    AutomationManager.scheduleAutomation(context, name, interval, prompt)
+                }
+                "cancel_automation" -> {
+                    val id = fnArgs.optString("automation_id", "")
+                    logs.add("Cancelling automation: $id")
+                    AutomationManager.cancelAutomation(context, id)
+                }
+                "save_knowledge" -> {
+                    val t = fnArgs.optString("title", "Note")
+                    val c = fnArgs.optString("content", "")
+                    val tags = fnArgs.optString("tags", "").split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    logs.add("Saving to Knowledge Base: $t")
+                    val entry = KnowledgeBaseManager.saveEntry(context, t, c, tags)
+                    "Knowledge saved successfully (ID: ${entry.id})."
+                }
+                "query_knowledge" -> {
+                    val q = fnArgs.optString("query", "")
+                    logs.add("Searching Knowledge Base for: $q")
+                    val results = KnowledgeBaseManager.searchKnowledge(context, q)
+                    if (results.isEmpty()) "No knowledge found for '$q'." else results.joinToString("\n---\n") { "[${it.title}] (Tags: ${it.tags.joinToString()}): ${it.content}" }
+                }
+                "create_artifact" -> {
+                    val t = fnArgs.optString("title", "Plan / Artifact")
+                    val s = fnArgs.optString("summary", "")
+                    val c = fnArgs.optString("content", "")
+                    val req = fnArgs.optBoolean("requires_feedback", true)
+                    logs.add("Creating interactive Artifact: $t")
+                    val artifact = ArtifactManager.createArtifact(t, s, c, req)
+                    createdArtifact = artifact
+                    "Artifact '$t' created successfully (ID: ${artifact.id})."
+                }
+                "maps_search" -> {
+                    val q = fnArgs.optString("query", "")
+                    logs.add("Searching Google Maps: $q")
+                    GoogleServicesBridge.searchPlaces(context, q)
+                }
+                "maps_directions" -> {
+                    val dest = fnArgs.optString("destination", "")
+                    val mode = fnArgs.optString("mode", "d")
+                    logs.add("Opening Google Maps Directions to: $dest")
+                    GoogleServicesBridge.getDirections(context, dest, mode)
+                }
+                "maps_location" -> {
+                    logs.add("Querying GPS Location")
+                    GoogleServicesBridge.getCurrentCoordinates(context)
+                }
+                "firebase_query" -> {
+                    val url = fnArgs.optString("database_url", "")
+                    val path = fnArgs.optString("path", "")
+                    logs.add("Querying Firebase: $path")
+                    GoogleServicesBridge.queryFirebaseRest(url, path)
+                }
+                "gcloud_status" -> {
+                    val svc = fnArgs.optString("service_name", "")
+                    val proj = fnArgs.optString("project_id", "")
+                    logs.add("Checking Google Cloud service: $svc")
+                    GoogleServicesBridge.checkGCloudResource(svc, proj)
+                }
+                "run_antigravity_sdk_script" -> {
+                    val code = fnArgs.optString("python_code", "")
+                    logs.add("Running Antigravity SDK Python Script")
+                    AntigravitySdkBridge.executePythonScript(context, code)
+                }
+                "swarm_spawn_worker" -> {
+                    val name = fnArgs.optString("name", "worker")
+                    val role = fnArgs.optString("role", "Specialist")
+                    val task = fnArgs.optString("task", "")
+                    logs.add("Spawning Swarm Worker: $name ($role)")
+                    val worker = SwarmCoordinator.spawnWorker(name, role, task = task)
+                    "Worker '${worker.name}' (${worker.role}) spawned in active Swarm."
+                }
+                "mcp_call_tool" -> {
+                    val server = fnArgs.optString("server_name", "")
+                    val tool = fnArgs.optString("tool_name", "")
+                    val args = fnArgs.optString("arguments", "{}")
+                    logs.add("Calling MCP tool: $tool on $server")
+                    SkillsEngine.callMcpTool(server, tool, args)
+                }
                 else -> {
                     logs.add("Unknown tool: $fnName")
                     "Unknown tool: $fnName"
@@ -647,6 +939,6 @@ class GeminiApiClient(private val context: Context) {
             history.put(toolResponseTurn)
         }
 
-        AgentResponse(finalReply.trim().ifEmpty { "Task completed." }, logs)
+        AgentResponse(finalReply.trim().ifEmpty { "Task completed." }, logs, accumulatedThinking, createdArtifact)
     }
 }

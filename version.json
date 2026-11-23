@@ -1,6 +1,6 @@
 {
-  "version_code": 12,
-  "version_name": "1.0.11",
+  "version_code": 13,
+  "version_name": "1.0.12",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "100% Zero-Confirmation Autonomous Execution: Agent now executes all device commands, ADB shell scripts, SMS, calls, and screen taps directly without asking for confirmation"
+  "changelog": "Antigravity Power Pack: Swarms & Agent Teams (/swarm), Artifacts Direct Feedback, Slash Commands (/plan, /grill-me, /boost, /automation), Knowledge Base long-term memory, Skills Engine (SKILL.md) & MCP bridge, Dynamic Thinking Control (0-8k tokens), Antigravity Python SDK, Google Cloud/Firebase/Maps official skills, and Privacy blocklist protection for banking/UPI apps"
 }

@@ -34,6 +34,27 @@ class AgentNotificationListenerService : NotificationListenerService() {
         private const val MAX_HISTORY = 100
         val notificationHistory = ConcurrentLinkedDeque<CapturedNotification>()
 
+        // Privacy blocklist: Exclude banking, UPI, and password manager apps from being recorded or shared with cloud AI
+        private val SENSITIVE_PACKAGES = setOf(
+            "com.google.android.apps.nbu.paisa.user", // Google Pay
+            "com.phonepe.app",                       // PhonePe
+            "net.one97.paytm",                       // Paytm
+            "in.org.npci.upiapp",                    // BHIM
+            "com.sbi.lotusintouch",                  // SBI Yono
+            "com.axis.mobile",                       // Axis Bank
+            "com.msf.kbank.mobile",                  // Kotak Bank
+            "com.csam.icici.bank.imobile",           // ICICI Bank
+            "com.hdfcbank.android",                  // HDFC Bank
+            "com.bankofbaroda.mconnect",             // BoB World
+            "com.canarabank.mobility",               // Canara ai1
+            "com.onepassword.android",               // 1Password
+            "com.lastpass.lpandroid",                // LastPass
+            "com.bitwarden",                         // Bitwarden
+            "com.dashlane",                          // Dashlane
+            "com.nordpass.android",                  // NordPass
+            "org.keepassdroid"                       // KeePass
+        )
+
         fun isPermissionGranted(context: Context): Boolean {
             val enabledListeners = NotificationManagerCompat.getEnabledListenerPackages(context)
             return enabledListeners.contains(context.packageName)
@@ -102,6 +123,9 @@ class AgentNotificationListenerService : NotificationListenerService() {
         val pkg = sbn.packageName ?: return
         // Ignore our own package
         if (pkg == packageName) return
+
+        // Privacy blocklist: Ignore banking, UPI, and password manager apps
+        if (SENSITIVE_PACKAGES.contains(pkg)) return
 
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""

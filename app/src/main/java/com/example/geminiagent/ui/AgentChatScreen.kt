@@ -53,6 +53,20 @@ import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import com.example.geminiagent.usage.UsageStats
 import com.example.geminiagent.voice.VoiceCommander
+import com.example.geminiagent.artifacts.AgentArtifact
+import com.example.geminiagent.artifacts.ArtifactStatus
+import com.example.geminiagent.artifacts.ArtifactFeedbackStatus
+import com.example.geminiagent.artifacts.ArtifactManager
+import com.example.geminiagent.automation.AutomationManager
+import com.example.geminiagent.knowledge.KnowledgeBaseManager
+import com.example.geminiagent.swarm.SlashCommands
+import com.example.geminiagent.swarm.SwarmCoordinator
+import com.example.geminiagent.swarm.SwarmWorker
+import com.example.geminiagent.swarm.WorkerStatus
+import com.example.geminiagent.swarm.BoardMessage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -135,6 +149,13 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     var paletteSearchQuery by remember { mutableStateOf("") }
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
+    var showSwarmBoardDialog by remember { mutableStateOf(false) }
+    var showKnowledgeBaseDialog by remember { mutableStateOf(false) }
+    var showAutomationsDialog by remember { mutableStateOf(false) }
+    var thinkingBudget by remember {
+        mutableIntStateOf(prefs.getInt("thinking_budget", 2048))
+    }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -145,7 +166,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         }
     }
 
-    // Send Message Handler
+    // Send Message Handler with Slash Commands & Dynamic Thinking Control
     fun doSendMessage(promptText: String) {
         val trimmed = promptText.trim()
         if (trimmed.isEmpty() || isLoading) return
@@ -154,6 +175,10 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
             return
         }
 
+        val slashResult = SlashCommands.parse(trimmed)
+        val promptToSend = slashResult.transformedPrompt
+        val effectiveThinkingBudget = if (slashResult.isBoostMode) 8192 else thinkingBudget
+
         inputText = ""
         val userMsg = ChatMessage(sender = MessageSender.USER, text = trimmed)
         messages = messages + userMsg
@@ -161,12 +186,14 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
         scope.launch {
             listState.animateScrollToItem(messages.size - 1)
-            val response = apiClient.sendMessage(apiKey, trimmed, selectedModel)
+            val response = apiClient.sendMessage(apiKey, promptToSend, selectedModel, effectiveThinkingBudget)
             val toolLogs = if (response.logs.isNotEmpty()) response.logs.joinToString("\n") else null
             val agentMsg = ChatMessage(
                 sender = MessageSender.AGENT,
                 text = response.text,
-                toolLog = toolLogs
+                toolLog = toolLogs,
+                thinkingText = response.thinkingText,
+                artifact = response.artifact
             )
             messages = messages + agentMsg
             isLoading = false
@@ -263,7 +290,15 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     },
                     onSelectProject = {
                         scope.launch { drawerState.close() }
-                        showNewProjectDialog = true
+                        showSwarmBoardDialog = true
+                    },
+                    onSelectKnowledge = {
+                        scope.launch { drawerState.close() }
+                        showKnowledgeBaseDialog = true
+                    },
+                    onSelectAutomations = {
+                        scope.launch { drawerState.close() }
+                        showAutomationsDialog = true
                     },
                     onSelectConversations = {
                         scope.launch { drawerState.close() }
@@ -427,7 +462,21 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(messages, key = { it.id }) { msg ->
-                        AntigravityChatBubble(msg)
+                        AntigravityChatBubble(
+                            msg = msg,
+                            onArtifactProceed = { artifact ->
+                                ArtifactManager.updateStatus(artifact.id, ArtifactStatus.PROCEED)
+                                doSendMessage("Proceed with approved artifact: '${artifact.title}'. Begin phase 1 execution.")
+                            },
+                            onArtifactRequestChanges = { artifact ->
+                                ArtifactManager.updateStatus(artifact.id, ArtifactStatus.REQUEST_CHANGES)
+                                inputText = "Please adjust artifact '${artifact.title}': "
+                            },
+                            onArtifactReject = { artifact ->
+                                ArtifactManager.updateStatus(artifact.id, ArtifactStatus.REJECTED)
+                                Toast.makeText(context, "Artifact rejected: ${artifact.title}", Toast.LENGTH_SHORT).show()
+                            }
+                        )
                     }
                     if (isLoading) {
                         item {
@@ -1069,6 +1118,18 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     showQuickActionsSheet = false
                     showUsageDialog = true
                 }
+                QuickActionItem(icon = Icons.Default.Groups, title = "Swarm Message Board (/swarm)", subtitle = "Coordinate parallel multi-agent workers") {
+                    showQuickActionsSheet = false
+                    showSwarmBoardDialog = true
+                }
+                QuickActionItem(icon = Icons.Default.MenuBook, title = "Knowledge Base", subtitle = "View and edit long-term agent memory and rules") {
+                    showQuickActionsSheet = false
+                    showKnowledgeBaseDialog = true
+                }
+                QuickActionItem(icon = Icons.Default.Schedule, title = "Scheduled Automations (/automation)", subtitle = "Manage periodic autonomous background tasks") {
+                    showQuickActionsSheet = false
+                    showAutomationsDialog = true
+                }
                 QuickActionItem(icon = Icons.Default.Security, title = "OS Permissions & Services", subtitle = "Enable WhatsApp, Screen Control & Phone permissions") {
                     showQuickActionsSheet = false
                     showPermissionsSheet = true
@@ -1175,6 +1236,61 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
                 HorizontalDivider(color = Color(0xFF2E3035), modifier = Modifier.padding(vertical = 12.dp))
 
+                // Dynamic Thinking Budget Control
+                Text(
+                    text = "Dynamic Thinking Budget",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Text(
+                    text = "Configures extended reasoning budget (tokens) for Gemini 3.8/3.1 and /boost mode.",
+                    fontSize = 11.sp,
+                    color = Color(0xFF94A3B8)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val thinkingOptions = listOf(
+                    0 to "Off (0)",
+                    1024 to "Low (1k)",
+                    2048 to "Med (2k)",
+                    4096 to "Deep (4k)",
+                    8192 to "Boost (8k)"
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    thinkingOptions.forEach { (budget, label) ->
+                        val isSelected = thinkingBudget == budget
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    thinkingBudget = budget
+                                    prefs.edit().putInt("thinking_budget", budget).apply()
+                                },
+                            color = if (isSelected) Color(0xFF2563EB) else Color(0xFF222226),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF2E3035))
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Color.White else Color(0xFFCBD5E1)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF2E3035), modifier = Modifier.padding(vertical = 12.dp))
+
                 // View Usage Link
                 Surface(
                     modifier = Modifier
@@ -1206,6 +1322,38 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 Spacer(modifier = Modifier.height(18.dp))
             }
         }
+    }
+
+    // Swarm / Agent Teams Message Board Dialog
+    if (showSwarmBoardDialog) {
+        SwarmBoardDialog(
+            onDismiss = { showSwarmBoardDialog = false },
+            onSpawnWorker = { name, _, _ ->
+                Toast.makeText(context, "Spawned worker: $name", Toast.LENGTH_SHORT).show()
+            },
+            onPostMessage = { _, _ ->
+                Toast.makeText(context, "Posted to swarm board", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    // Knowledge Base Dialog
+    if (showKnowledgeBaseDialog) {
+        KnowledgeBaseDialog(
+            context = context,
+            onDismiss = { showKnowledgeBaseDialog = false }
+        )
+    }
+
+    // Scheduled Automations Dialog
+    if (showAutomationsDialog) {
+        AutomationsDialog(
+            context = context,
+            onDismiss = { showAutomationsDialog = false },
+            onRunTaskNow = { prompt ->
+                doSendMessage(prompt)
+            }
+        )
     }
 
     // Antigravity Rate Limits Dialog
@@ -1631,11 +1779,17 @@ fun AntigravityUsageRow(
 }
 
 @Composable
-fun AntigravityChatBubble(msg: ChatMessage) {
+fun AntigravityChatBubble(
+    msg: ChatMessage,
+    onArtifactProceed: ((AgentArtifact) -> Unit)? = null,
+    onArtifactRequestChanges: ((AgentArtifact) -> Unit)? = null,
+    onArtifactReject: ((AgentArtifact) -> Unit)? = null
+) {
     val isUser = msg.sender == MessageSender.USER
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     var isToolsExpanded by remember { mutableStateOf(false) }
+    var isThinkingExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1660,6 +1814,62 @@ fun AntigravityChatBubble(msg: ChatMessage) {
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
+            }
+        }
+
+        // Expandable Dynamic Thinking Process (Deep Reasoning & Boost)
+        if (!isUser && !msg.thinkingText.isNullOrBlank()) {
+            Surface(
+                color = Color(0xFF141822),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, Color(0xFF263045)),
+                modifier = Modifier
+                    .fillMaxWidth(0.95f)
+                    .padding(bottom = 6.dp)
+                    .clickable { isThinkingExpanded = !isThinkingExpanded }
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Lightbulb,
+                                contentDescription = null,
+                                tint = Color(0xFFFBBF24),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Thinking Process (${msg.thinkingText.length} chars)",
+                                color = Color(0xFFFCD34D),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Icon(
+                            if (isThinkingExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    if (isThinkingExpanded) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        HorizontalDivider(color = Color(0xFF263045))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = msg.thinkingText,
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
         }
 
@@ -1809,6 +2019,148 @@ fun AntigravityChatBubble(msg: ChatMessage) {
                 }
             }
         }
+
+        // Interactive Artifact Card with Direct Feedback
+        if (!isUser && msg.artifact != null) {
+            val artifact = msg.artifact
+            var currentStatus by remember(artifact.status) { mutableStateOf(artifact.status) }
+
+            Surface(
+                color = Color(0xFF141519),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f)),
+                modifier = Modifier
+                    .fillMaxWidth(0.98f)
+                    .padding(top = 8.dp, bottom = 4.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = artifact.title,
+                                color = Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color(0xFF0284C7).copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "ARTIFACT",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (artifact.summary.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = artifact.summary,
+                            color = Color(0xFF94A3B8),
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = Color(0xFF0C0D10),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = if (artifact.content.length > 350) artifact.content.take(350) + "\n... (truncated)" else artifact.content,
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 11.5.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+
+                    if (artifact.requiresFeedback && currentStatus == ArtifactStatus.PENDING_REVIEW) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    currentStatus = ArtifactStatus.PROCEED
+                                    onArtifactProceed?.invoke(artifact)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Proceed", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    currentStatus = ArtifactStatus.REQUEST_CHANGES
+                                    onArtifactRequestChanges?.invoke(artifact)
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFF64748B)),
+                                modifier = Modifier.weight(1.1f),
+                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Changes", color = Color.LightGray, fontSize = 11.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    currentStatus = ArtifactStatus.REJECTED
+                                    onArtifactReject?.invoke(artifact)
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
+                                modifier = Modifier.weight(0.9f),
+                                contentPadding = PaddingValues(vertical = 4.dp, horizontal = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Reject", color = Color(0xFFEF4444), fontSize = 11.sp)
+                            }
+                        }
+                    } else if (currentStatus != ArtifactStatus.PENDING_REVIEW) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Status: ${currentStatus.name}",
+                            color = when (currentStatus) {
+                                ArtifactStatus.PROCEED, ArtifactStatus.APPROVED -> Color(0xFF4ADE80)
+                                ArtifactStatus.REQUEST_CHANGES -> Color(0xFFFBBF24)
+                                ArtifactStatus.REJECTED -> Color(0xFFF87171)
+                                else -> Color.Gray
+                            },
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1917,6 +2269,8 @@ fun AntigravityDrawerContent(
     onSelectModels: () -> Unit,
     onSelectBrowser: () -> Unit,
     onSelectProject: () -> Unit,
+    onSelectKnowledge: () -> Unit,
+    onSelectAutomations: () -> Unit,
     onSelectConversations: () -> Unit,
     onGiveFeedback: () -> Unit
 ) {
@@ -1958,6 +2312,18 @@ fun AntigravityDrawerContent(
             isSelected = false,
             leadingIcon = Icons.Default.Folder,
             onClick = onSelectProject
+        )
+        DrawerNavItem(
+            title = "Knowledge Base",
+            isSelected = false,
+            leadingIcon = Icons.Default.MenuBook,
+            onClick = onSelectKnowledge
+        )
+        DrawerNavItem(
+            title = "Automations (/automation)",
+            isSelected = false,
+            leadingIcon = Icons.Default.Schedule,
+            onClick = onSelectAutomations
         )
 
         Spacer(modifier = Modifier.height(14.dp))
@@ -2145,4 +2511,391 @@ fun PaletteActionRow(
             }
         }
     }
+}
+
+@Composable
+fun SwarmBoardDialog(
+    onDismiss: () -> Unit,
+    onSpawnWorker: (String, String, String) -> Unit,
+    onPostMessage: (String, String) -> Unit
+) {
+    val workers by SwarmCoordinator.workers.collectAsState()
+    val messages by SwarmCoordinator.boardMessages.collectAsState()
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var newWorkerName by remember { mutableStateOf("") }
+    var boardPostText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141417),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Groups, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Swarm / Agent Teams (/swarm)", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = Color(0xFF1E1E24),
+                    contentColor = Color(0xFF38BDF8)
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text("Workers (${workers.size})", fontSize = 12.sp) }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text("Message Board (${messages.size})", fontSize = 12.sp) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (selectedTab == 0) {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(workers) { worker ->
+                            Surface(
+                                color = Color(0xFF1E2028),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Color(0xFF2C3240)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(worker.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("${worker.role} • ${worker.model}", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                        if (worker.currentTask.isNotBlank()) {
+                                            Text(worker.currentTask, color = Color(0xFF64748B), fontSize = 10.5.sp, maxLines = 1)
+                                        }
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = when (worker.status) {
+                                            WorkerStatus.WORKING -> Color(0xFF22C55E).copy(alpha = 0.2f)
+                                            WorkerStatus.COMPLETED -> Color(0xFF0284C7).copy(alpha = 0.2f)
+                                            WorkerStatus.IDLE -> Color(0xFF64748B).copy(alpha = 0.2f)
+                                            WorkerStatus.ERROR -> Color(0xFFEF4444).copy(alpha = 0.2f)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = worker.status.name,
+                                            color = when (worker.status) {
+                                                WorkerStatus.WORKING -> Color(0xFF4ADE80)
+                                                WorkerStatus.COMPLETED -> Color(0xFF38BDF8)
+                                                WorkerStatus.IDLE -> Color(0xFF94A3B8)
+                                                WorkerStatus.ERROR -> Color(0xFFF87171)
+                                            },
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newWorkerName,
+                        onValueChange = { newWorkerName = it },
+                        placeholder = { Text("Worker name (e.g. researcher)", fontSize = 11.sp, color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            if (newWorkerName.isNotBlank()) {
+                                val w = SwarmCoordinator.spawnWorker(newWorkerName.trim(), "Worker", task = "Active worker")
+                                onSpawnWorker(w.name, w.role, w.currentTask)
+                                newWorkerName = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text("Spawn Worker", fontSize = 11.5.sp)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(messages) { msg ->
+                            Surface(
+                                color = Color(0xFF1E2028),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("${msg.from} → @${msg.to}", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 11.5.sp)
+                                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(msg.timestamp))
+                                        Text(timeStr, color = Color.Gray, fontSize = 9.5.sp)
+                                    }
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(msg.content, color = Color(0xFFE2E8F0), fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = boardPostText,
+                            onValueChange = { boardPostText = it },
+                            placeholder = { Text("Post to swarm board...", fontSize = 11.sp, color = Color.Gray) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        IconButton(
+                            onClick = {
+                                if (boardPostText.isNotBlank()) {
+                                    SwarmCoordinator.postMessage("coordinator", "all", boardPostText.trim())
+                                    onPostMessage("coordinator", boardPostText.trim())
+                                    boardPostText = ""
+                                }
+                            }
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color(0xFF38BDF8))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF38BDF8))
+            }
+        }
+    )
+}
+
+@Composable
+fun KnowledgeBaseDialog(
+    context: Context,
+    onDismiss: () -> Unit
+) {
+    var items: List<com.example.geminiagent.knowledge.KnowledgeEntry> by remember { mutableStateOf(KnowledgeBaseManager.getAllKnowledge(context)) }
+    var newKey by remember { mutableStateOf("") }
+    var newValue by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141417),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Knowledge Base", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                Text(
+                    "Long-term agent memory. Facts and rules stored here are injected into prompt context automatically.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(items) { item ->
+                        Surface(
+                            color = Color(0xFF1E2028),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(item.title, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text(item.content, color = Color(0xFFE2E8F0), fontSize = 11.sp)
+                                }
+                                IconButton(
+                                    onClick = {
+                                        KnowledgeBaseManager.deleteKnowledge(context, item.id)
+                                        items = KnowledgeBaseManager.getAllKnowledge(context)
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = newKey,
+                    onValueChange = { newKey = it },
+                    placeholder = { Text("Topic / Key (e.g. user_preference)", fontSize = 11.sp, color = Color.Gray) },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = newValue,
+                    onValueChange = { newValue = it },
+                    placeholder = { Text("Fact / Rule content", fontSize = 11.sp, color = Color.Gray) },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    singleLine = true
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Button(
+                    onClick = {
+                        if (newKey.isNotBlank() && newValue.isNotBlank()) {
+                            KnowledgeBaseManager.saveKnowledge(context, newKey.trim(), newValue.trim())
+                            items = KnowledgeBaseManager.getAllKnowledge(context)
+                            newKey = ""
+                            newValue = ""
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED)),
+                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                ) {
+                    Text("Add Knowledge", fontSize = 11.5.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF38BDF8))
+            }
+        }
+    )
+}
+
+@Composable
+fun AutomationsDialog(
+    context: Context,
+    onDismiss: () -> Unit,
+    onRunTaskNow: (String) -> Unit
+) {
+    var automations: List<com.example.geminiagent.automation.ScheduledAutomation> by remember { mutableStateOf(AutomationManager.getAllAutomations(context)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141417),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Schedule, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Scheduled Automations (/automation)", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp)) {
+                Text(
+                    "Autonomous background tasks executed by Android AlarmManager / WorkManager.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (automations.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                        Text("No active automations. Use /automation to schedule tasks.", color = Color.Gray, fontSize = 12.sp)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(automations) { item ->
+                            Surface(
+                                color = Color(0xFF1E2028),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(item.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (item.isEnabled) Color(0xFF22C55E).copy(alpha = 0.2f) else Color(0xFF64748B).copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                text = if (item.isEnabled) "ACTIVE" else "PAUSED",
+                                                color = if (item.isEnabled) Color(0xFF4ADE80) else Color(0xFF94A3B8),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Interval: ${item.intervalMinutes}m • Prompt: ${item.prompt}", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        TextButton(
+                                            onClick = {
+                                                onRunTaskNow(item.prompt)
+                                                onDismiss()
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Run Now", fontSize = 10.5.sp, color = Color(0xFF38BDF8))
+                                        }
+                                        TextButton(
+                                            onClick = {
+                                                AutomationManager.cancelAutomation(context, item.id)
+                                                automations = AutomationManager.getAllAutomations(context)
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Cancel", fontSize = 10.5.sp, color = Color(0xFFEF4444))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF38BDF8))
+            }
+        }
+    )
 }
