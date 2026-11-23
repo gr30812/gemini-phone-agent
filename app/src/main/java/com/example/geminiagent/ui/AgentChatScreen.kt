@@ -44,6 +44,7 @@ import androidx.core.content.ContextCompat
 import com.example.geminiagent.api.GeminiApiClient
 import com.example.geminiagent.model.ChatMessage
 import com.example.geminiagent.model.MessageSender
+import com.example.geminiagent.os.OSPermissionsManager
 import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import com.example.geminiagent.usage.UsageStats
@@ -91,6 +92,13 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     var showModelBottomSheet by remember { mutableStateOf(false) }
     var showUsageDialog by remember { mutableStateOf(false) }
     var showQuickActionsSheet by remember { mutableStateOf(false) }
+    var showPermissionsSheet by remember { mutableStateOf(false) }
+
+    val requestRuntimePermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        Toast.makeText(context, "Permissions updated", Toast.LENGTH_SHORT).show()
+    }
 
     val updater = remember { AppUpdater(context) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -536,6 +544,10 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     showQuickActionsSheet = false
                     showUsageDialog = true
                 }
+                QuickActionItem(icon = Icons.Default.Security, title = "OS Permissions & Services", subtitle = "Enable WhatsApp, Screen Control & Phone permissions") {
+                    showQuickActionsSheet = false
+                    showPermissionsSheet = true
+                }
                 QuickActionItem(icon = Icons.Default.Settings, title = "Agent Settings", subtitle = "Configure API Key and OTA updates") {
                     showQuickActionsSheet = false
                     showSettingsDialog = true
@@ -851,6 +863,32 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = Color(0xFF333333))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 4. Android OS Services & Permissions
+                    Text("4. OS Services & Automation:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("WhatsApp, Screen & Calls", fontSize = 12.sp, color = Color.LightGray)
+                        OutlinedButton(
+                            onClick = {
+                                showSettingsDialog = false
+                                showPermissionsSheet = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Manage", fontSize = 11.sp)
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -878,6 +916,71 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
             },
             containerColor = Color(0xFF1E1E22)
         )
+    }
+
+    // Android OS Permissions & Services BottomSheet
+    if (showPermissionsSheet) {
+        val permStatus = remember { OSPermissionsManager.getStatus(context) }
+        ModalBottomSheet(
+            onDismissRequest = { showPermissionsSheet = false },
+            containerColor = Color(0xFF18181B),
+            scrimColor = Color.Black.copy(alpha = 0.6f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("OS Permissions & Automation", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Enable OS permissions below so Antigravity Agent can read incoming WhatsApp messages, inspect the phone screen, simulate taps, and make calls.",
+                    fontSize = 11.5.sp,
+                    color = Color.LightGray
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // 1. Notification Listener Access (WhatsApp & Chat alerts)
+                OSPermissionRow(
+                    title = "Notification Listener Access",
+                    description = "Reads incoming WhatsApp, Telegram & SMS messages",
+                    isGranted = permStatus.notificationAccess,
+                    buttonText = "Open Settings",
+                    onAction = { OSPermissionsManager.openNotificationSettings(context) }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2. Accessibility Automation Service (Screen & Touch Control)
+                OSPermissionRow(
+                    title = "Accessibility Automation Service",
+                    description = "Inspects active screen content and clicks elements",
+                    isGranted = permStatus.accessibilityService,
+                    buttonText = "Enable Service",
+                    onAction = { OSPermissionsManager.openAccessibilitySettings(context) }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 3. Runtime Permissions (Phone, SMS, Contacts)
+                val runtimeGranted = permStatus.contactsPermission && permStatus.phoneCallPermission && permStatus.smsPermission
+                OSPermissionRow(
+                    title = "Phone Calls, SMS & Contacts",
+                    description = "Dials numbers, reads contacts & sends SMS messages",
+                    isGranted = runtimeGranted,
+                    buttonText = "Grant Permissions",
+                    onAction = {
+                        requestRuntimePermissionsLauncher.launch(OSPermissionsManager.REQUIRED_RUNTIME_PERMISSIONS)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
     }
 }
 
@@ -1195,4 +1298,61 @@ fun parseMarkdownBlocks(rawText: String): List<ContentBlock> {
     }
 
     return blocks
+}
+
+@Composable
+fun OSPermissionRow(
+    title: String,
+    description: String,
+    isGranted: Boolean,
+    buttonText: String,
+    onAction: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color(0xFF222226),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, if (isGranted) Color(0xFF1E3A8A) else Color(0xFF333338))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (isGranted) Color(0xFF14532D) else Color(0xFF450A0A)
+                    ) {
+                        Text(
+                            text = if (isGranted) "Enabled" else "Disabled",
+                            color = if (isGranted) Color(0xFF86EFAC) else Color(0xFFFCA5A5),
+                            fontSize = 9.sp,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(description, color = Color.Gray, fontSize = 11.sp)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            if (!isGranted) {
+                Button(
+                    onClick = onAction,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.height(30.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text(buttonText, fontSize = 10.5.sp)
+                }
+            } else {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(20.dp))
+            }
+        }
+    }
 }

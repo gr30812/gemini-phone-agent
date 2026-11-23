@@ -1,6 +1,9 @@
 package com.example.geminiagent.api
 
 import android.content.Context
+import com.example.geminiagent.os.AgentAccessibilityService
+import com.example.geminiagent.os.AgentNotificationListenerService
+import com.example.geminiagent.os.DeviceBridge
 import com.example.geminiagent.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -84,6 +87,7 @@ class GeminiApiClient(private val context: Context) {
         val toolObject = JSONObject()
         val funcDeclarations = JSONArray()
 
+        // 1. read_file
         funcDeclarations.put(JSONObject().apply {
             put("name", "read_file")
             put("description", "Reads content from a file in the workspace.")
@@ -99,6 +103,7 @@ class GeminiApiClient(private val context: Context) {
             })
         })
 
+        // 2. write_file
         funcDeclarations.put(JSONObject().apply {
             put("name", "write_file")
             put("description", "Writes code or text content to a file in the workspace.")
@@ -118,6 +123,7 @@ class GeminiApiClient(private val context: Context) {
             })
         })
 
+        // 3. list_files
         funcDeclarations.put(JSONObject().apply {
             put("name", "list_files")
             put("description", "Lists all files in the agent workspace.")
@@ -127,6 +133,7 @@ class GeminiApiClient(private val context: Context) {
             })
         })
 
+        // 4. execute_command
         funcDeclarations.put(JSONObject().apply {
             put("name", "execute_command")
             put("description", "Executes a shell command inside the workspace.")
@@ -139,6 +146,207 @@ class GeminiApiClient(private val context: Context) {
                     })
                 })
                 put("required", JSONArray().put("command"))
+            })
+        })
+
+        // 5. get_recent_notifications
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "get_recent_notifications")
+            put("description", "Retrieves recently received phone notifications (e.g. WhatsApp, SMS, Telegram, Gmail). Use this to see who messaged the user or read alerts.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("app_filter", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Optional filter by app name or package (e.g. 'WhatsApp', 'Telegram', 'SMS')")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Maximum number of notifications to return (default 10)")
+                    })
+                })
+            })
+        })
+
+        // 6. reply_to_notification
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "reply_to_notification")
+            put("description", "Replies directly to an incoming notification (such as a WhatsApp or SMS message) using its notification ID.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("notification_id", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "The ID of the notification obtained from get_recent_notifications")
+                    })
+                    put("reply_text", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "The text message reply to send")
+                    })
+                })
+                put("required", JSONArray().put("notification_id").put("reply_text"))
+            })
+        })
+
+        // 7. read_screen_content
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "read_screen_content")
+            put("description", "Reads all visible text, buttons, and UI elements currently active on the phone's screen via Accessibility Service.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
+            })
+        })
+
+        // 8. click_screen_element
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "click_screen_element")
+            put("description", "Simulates clicking/tapping an on-screen element or button by matching text or resource ID.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("target_text", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "The text or ID of the button/element to click")
+                    })
+                })
+                put("required", JSONArray().put("target_text"))
+            })
+        })
+
+        // 9. perform_device_action
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "perform_device_action")
+            put("description", "Performs an Android global navigation action: HOME, BACK, RECENTS, or NOTIFICATIONS.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("action", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "One of: 'HOME', 'BACK', 'RECENTS', 'NOTIFICATIONS'")
+                    })
+                })
+                put("required", JSONArray().put("action"))
+            })
+        })
+
+        // 10. open_app
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "open_app")
+            put("description", "Launches any installed app on the phone by name or package (e.g. 'WhatsApp', 'YouTube', 'Settings', 'Chrome', 'Camera').")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("app_name", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Name or package of the application to open")
+                    })
+                })
+                put("required", JSONArray().put("app_name"))
+            })
+        })
+
+        // 11. read_contacts
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "read_contacts")
+            put("description", "Looks up phone numbers and contacts from the user's address book.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("search_query", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Optional contact name to search for")
+                    })
+                    put("limit", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Maximum contacts to retrieve (default 10)")
+                    })
+                })
+            })
+        })
+
+        // 12. make_phone_call
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "make_phone_call")
+            put("description", "Dials or initiates a phone call to a specified phone number.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("phone_number", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Phone number to call")
+                    })
+                })
+                put("required", JSONArray().put("phone_number"))
+            })
+        })
+
+        // 13. read_recent_sms
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "read_recent_sms")
+            put("description", "Reads recent SMS text messages from the inbox.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("limit", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Maximum messages to retrieve (default 10)")
+                    })
+                })
+            })
+        })
+
+        // 14. send_sms
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "send_sms")
+            put("description", "Sends an SMS text message to a specific phone number.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("phone_number", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Recipient phone number")
+                    })
+                    put("message", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "SMS body text to send")
+                    })
+                })
+                put("required", JSONArray().put("phone_number").put("message"))
+            })
+        })
+
+        // 15. set_alarm
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "set_alarm")
+            put("description", "Schedules an alarm clock alert on the phone for a specific hour and minute.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("hour", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Hour in 24-hour format (0-23)")
+                    })
+                    put("minute", JSONObject().apply {
+                        put("type", "INTEGER")
+                        put("description", "Minute (0-59)")
+                    })
+                    put("message", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Optional alarm label or message")
+                    })
+                })
+                put("required", JSONArray().put("hour").put("minute"))
+            })
+        })
+
+        // 16. get_device_status
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "get_device_status")
+            put("description", "Inspects device battery level, charging status, Wi-Fi/network connectivity, available RAM, and storage.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject())
             })
         })
 
@@ -180,10 +388,25 @@ class GeminiApiClient(private val context: Context) {
 
         var finalReply = ""
 
+        // Antigravity System Instruction
+        val sysInstruction = JSONObject().apply {
+            put("parts", JSONArray().put(JSONObject().apply {
+                put("text", "You are Antigravity Agent, an autonomous personal assistant running natively on the user's Android phone. " +
+                        "You have full OS-level device access through available tools. " +
+                        "When the user asks who messaged them, asks about WhatsApp, Telegram, or notifications, call 'get_recent_notifications' and inspect the sender and content. " +
+                        "You can reply to chats using 'reply_to_notification'. " +
+                        "You can inspect the screen with 'read_screen_content', tap on elements with 'click_screen_element', and navigate with 'perform_device_action'. " +
+                        "You can open apps with 'open_app', lookup contacts with 'read_contacts', make calls with 'make_phone_call', read and send SMS with 'read_recent_sms' and 'send_sms', set alarms with 'set_alarm', and check battery/RAM with 'get_device_status'. " +
+                        "You can also write and execute scripts with 'read_file', 'write_file', 'list_files', and 'execute_command'. " +
+                        "Always execute tools directly to perform the requested actions and provide concise, helpful answers in English.")
+            }))
+        }
+
         while (true) {
             val payload = JSONObject().apply {
                 put("contents", history)
                 put("tools", getToolsDefinition())
+                put("system_instruction", sysInstruction)
             }
 
             var successResponse: JSONObject? = null
@@ -240,22 +463,28 @@ class GeminiApiClient(private val context: Context) {
                 return@withContext AgentResponse("No response received from Gemini.", logs)
             }
 
-            val candidateContent = candidates.getJSONObject(0).getJSONObject("content")
-            history.put(candidateContent)
+            val firstCandidate = candidates.getJSONObject(0)
+            val content = firstCandidate.optJSONObject("content")
+            val parts = content?.optJSONArray("parts") ?: JSONArray()
 
-            val parts = candidateContent.optJSONArray("parts") ?: JSONArray()
             var functionCallObj: JSONObject? = null
-
             for (i in 0 until parts.length()) {
                 val part = parts.getJSONObject(i)
                 if (part.has("text")) {
-                    finalReply += part.getString("text") + "\n"
+                    finalReply += part.getString("text")
                 }
                 if (part.has("functionCall")) {
                     functionCallObj = part.getJSONObject("functionCall")
                 }
             }
 
+            // Save model response to history
+            history.put(JSONObject().apply {
+                put("role", "model")
+                put("parts", parts)
+            })
+
+            // If no tool call, generation is complete
             if (functionCallObj == null) {
                 break
             }
@@ -283,6 +512,97 @@ class GeminiApiClient(private val context: Context) {
                     val cmd = fnArgs.optString("command", "")
                     logs.add("Running command: $cmd")
                     executeShell(cmd)
+                }
+                "get_recent_notifications" -> {
+                    val filter = fnArgs.optString("app_filter", "")
+                    val limit = fnArgs.optInt("limit", 10)
+                    logs.add("Checking recent notifications (filter: '${filter.ifEmpty { "ALL" }}')")
+                    if (!AgentNotificationListenerService.isPermissionGranted(context)) {
+                        "Notification Access is not enabled. Please enable 'Antigravity Notification Listener' in Android Settings > Notification Access."
+                    } else {
+                        val list = AgentNotificationListenerService.getRecentNotifications(filter, limit)
+                        if (list.isEmpty()) {
+                            "No recent notifications found for '${filter.ifEmpty { "any app" }}'."
+                        } else {
+                            list.joinToString("\n---\n") {
+                                "[${it.timeFormatted}] App: ${it.appName} (${it.packageName})\nSender: ${it.title}\nMessage: ${it.text}\nID: ${it.id}"
+                            }
+                        }
+                    }
+                }
+                "reply_to_notification" -> {
+                    val id = fnArgs.optString("notification_id", "")
+                    val replyText = fnArgs.optString("reply_text", "")
+                    logs.add("Sending reply to notification: $id")
+                    val success = AgentNotificationListenerService.replyToNotification(id, replyText, context)
+                    if (success) "Reply dispatched successfully." else "Failed to reply (action not supported or notification expired)."
+                }
+                "read_screen_content" -> {
+                    logs.add("Capturing on-screen UI content")
+                    val service = AgentAccessibilityService.instance
+                    if (service == null) {
+                        "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
+                    } else {
+                        service.getScreenContent()
+                    }
+                }
+                "click_screen_element" -> {
+                    val target = fnArgs.optString("target_text", "")
+                    logs.add("Simulating click on: $target")
+                    val service = AgentAccessibilityService.instance
+                    if (service == null) {
+                        "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
+                    } else {
+                        service.clickElement(target)
+                    }
+                }
+                "perform_device_action" -> {
+                    val action = fnArgs.optString("action", "HOME")
+                    logs.add("Performing navigation action: $action")
+                    val service = AgentAccessibilityService.instance
+                    if (service == null) {
+                        "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
+                    } else {
+                        service.executeGlobal(action)
+                    }
+                }
+                "open_app" -> {
+                    val app = fnArgs.optString("app_name", "")
+                    logs.add("Launching app: $app")
+                    DeviceBridge.openApp(context, app)
+                }
+                "read_contacts" -> {
+                    val q = fnArgs.optString("search_query", "")
+                    val lim = fnArgs.optInt("limit", 15)
+                    logs.add("Querying contacts: $q")
+                    DeviceBridge.readContacts(context, q, lim)
+                }
+                "make_phone_call" -> {
+                    val num = fnArgs.optString("phone_number", "")
+                    logs.add("Calling: $num")
+                    DeviceBridge.makeCall(context, num)
+                }
+                "read_recent_sms" -> {
+                    val lim = fnArgs.optInt("limit", 10)
+                    logs.add("Reading recent SMS inbox")
+                    DeviceBridge.readRecentSms(context, lim)
+                }
+                "send_sms" -> {
+                    val num = fnArgs.optString("phone_number", "")
+                    val msg = fnArgs.optString("message", "")
+                    logs.add("Sending SMS to $num")
+                    DeviceBridge.sendSms(context, num, msg)
+                }
+                "set_alarm" -> {
+                    val h = fnArgs.optInt("hour", 8)
+                    val m = fnArgs.optInt("minute", 0)
+                    val msg = fnArgs.optString("message", "Antigravity Alarm")
+                    logs.add("Scheduling alarm for $h:$m")
+                    DeviceBridge.setAlarm(context, h, m, msg)
+                }
+                "get_device_status" -> {
+                    logs.add("Reading battery, network, storage and RAM")
+                    DeviceBridge.getDeviceStatus(context)
                 }
                 else -> {
                     logs.add("Unknown tool: $fnName")
