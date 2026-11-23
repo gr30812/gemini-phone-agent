@@ -1,6 +1,7 @@
 package com.example.geminiagent.api
 
 import android.content.Context
+import com.example.geminiagent.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -22,6 +23,10 @@ class GeminiApiClient(private val context: Context) {
 
     private val workspaceDir: File = File(context.filesDir, "workspace").apply { mkdirs() }
     private val history = JSONArray()
+    val usageTracker = UsageTracker(context)
+
+    // Available models with fallback
+    private val availableModels = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro")
 
     private fun safePath(path: String): File {
         val target = File(workspaceDir, path).canonicalFile
@@ -120,7 +125,6 @@ class GeminiApiClient(private val context: Context) {
         }
         history.put(userTurn)
 
-        // Prioritize the user-selected model, followed by fallbacks
         val modelsToTry = buildList {
             add(selectedModel)
             if (selectedModel != "gemini-3.8-flash") add("gemini-3.8-flash")
@@ -163,7 +167,7 @@ class GeminiApiClient(private val context: Context) {
                             continue
                         } else {
                             lastErrorMessage = "Error ${response.code}: $responseBody"
-                            break // Try next model
+                            break
                         }
                     } catch (e: Exception) {
                         lastErrorMessage = "Connection error: ${e.message}"
@@ -178,6 +182,11 @@ class GeminiApiClient(private val context: Context) {
                     logs
                 )
             }
+
+            // Record usage tokens and request stats
+            val usageMeta = successResponse.optJSONObject("usageMetadata")
+            val tokens = usageMeta?.optLong("totalTokenCount", 0L) ?: 0L
+            usageTracker.recordRequest(tokens)
 
             val candidates = successResponse.optJSONArray("candidates")
             if (candidates == null || candidates.length() == 0) {

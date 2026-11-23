@@ -1,6 +1,6 @@
 {
-  "version_code": 3,
-  "version_name": "1.0.2",
+  "version_code": 4,
+  "version_name": "1.0.3",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "Added interactive Model Selector bottom sheet (Flash, Pro, Balanced)"
+  "changelog": "Added View Usage and Rate Limits tracker with circular progress indicators"
 }

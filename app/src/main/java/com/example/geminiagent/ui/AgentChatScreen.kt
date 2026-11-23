@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,6 +31,7 @@ import com.example.geminiagent.model.ChatMessage
 import com.example.geminiagent.model.MessageSender
 import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
+import com.example.geminiagent.usage.UsageStats
 import kotlinx.coroutines.launch
 
 data class ModelOption(
@@ -57,6 +61,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     var showSettingsDialog by remember { mutableStateOf(apiKey.isEmpty()) }
     var showModelBottomSheet by remember { mutableStateOf(false) }
+    var showUsageDialog by remember { mutableStateOf(false) }
 
     val updater = remember { AppUpdater(context) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -314,16 +319,16 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Text(
-                    text = "মডেল নির্বাচন করুন (Model Picker)",
+                    text = "মডেল নির্বাচন করুন (Model)",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
                 Text(
-                    text = "আপনার কাজের ধরন অনুযায়ী মডেল সিলেক্ট করুন:",
+                    text = "আপনার কাজের জন্য সেরা মডেলটি বেছে নিন:",
                     fontSize = 12.sp,
                     color = Color.Gray,
-                    modifier = Modifier.padding(bottom = 14.dp)
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
 
                 AVAILABLE_MODELS.forEach { model ->
@@ -331,7 +336,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 5.dp)
+                            .padding(vertical = 4.dp)
                             .clickable {
                                 selectedModel = model.id
                                 prefs.edit().putString("selected_model", model.id).apply()
@@ -344,7 +349,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -372,7 +377,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = model.description,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 11.sp,
                                     color = Color.LightGray
                                 )
                             }
@@ -387,9 +392,114 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(20.dp))
+
+                HorizontalDivider(
+                    color = Color(0xFF333333),
+                    modifier = Modifier.padding(vertical = 12.dp)
+                )
+
+                // View Usage Link
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showModelBottomSheet = false
+                            showUsageDialog = true
+                        },
+                    color = Color(0xFF2A2A2A),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.QueryStats, contentDescription = "Usage", tint = Color(0xFF38BDF8))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("View Usage & Rate Limits", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("কোটা ও রিমেইনিং লিমিট দেখুন", color = Color.Gray, fontSize = 11.sp)
+                            }
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Open", tint = Color.LightGray)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
+    }
+
+    // View Usage Dialog
+    if (showUsageDialog) {
+        val stats: UsageStats = remember { apiClient.usageTracker.getUsageStats() }
+        AlertDialog(
+            onDismissRequest = { showUsageDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.QueryStats, contentDescription = null, tint = Color(0xFF38BDF8))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("API Usage & Rate Limits", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1E1E1E), shape = RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        "Gemini Models",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Daily Limit Row
+                    UsageLimitRow(
+                        title = "Daily limit",
+                        resetsIn = stats.dailyResetsIn,
+                        percentLeft = stats.dailyPercentLeft,
+                        used = stats.dailyUsed,
+                        total = stats.dailyLimit
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // 5h Limit Row
+                    UsageLimitRow(
+                        title = "5h rolling limit",
+                        resetsIn = stats.fiveHourResetsIn,
+                        percentLeft = stats.fiveHourPercentLeft,
+                        used = stats.fiveHourUsed,
+                        total = stats.fiveHourLimit
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = Color(0xFF333333))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Total tokens used:", fontSize = 12.sp, color = Color.Gray)
+                        Text("${stats.totalTokens} tokens", fontSize = 12.sp, color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showUsageDialog = false }) {
+                    Text("ঠিক আছে")
+                }
+            },
+            containerColor = Color(0xFF181818)
+        )
     }
 
     // Settings Dialog
@@ -445,6 +555,45 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 }
             }
         )
+    }
+}
+
+@Composable
+fun UsageLimitRow(
+    title: String,
+    resetsIn: String,
+    percentLeft: Int,
+    used: Int,
+    total: Int
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(title, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
+            Text("Resets in $resetsIn", color = Color.Gray, fontSize = 11.5.sp)
+            Text("$used / $total requests", color = Color(0xFF6B7280), fontSize = 10.5.sp)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "$percentLeft% left",
+                color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFFF87171),
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Box(contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { percentLeft / 100f },
+                    modifier = Modifier.size(24.dp),
+                    color = if (percentLeft > 20) Color(0xFF4ADE80) else Color(0xFFF87171),
+                    trackColor = Color(0xFF2A2A2A),
+                    strokeWidth = 3.dp
+                )
+            }
+        }
     }
 }
 
