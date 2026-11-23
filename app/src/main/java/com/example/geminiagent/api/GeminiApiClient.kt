@@ -2,6 +2,7 @@ package com.example.geminiagent.api
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -21,6 +22,9 @@ class GeminiApiClient(private val context: Context) {
 
     private val workspaceDir: File = File(context.filesDir, "workspace").apply { mkdirs() }
     private val history = JSONArray()
+
+    // Available models with fallback
+    private val availableModels = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro")
 
     private fun safePath(path: String): File {
         val target = File(workspaceDir, path).canonicalFile
@@ -94,7 +98,6 @@ class GeminiApiClient(private val context: Context) {
             put("description", "Lists all files in the agent workspace.")
             put("parameters", JSONObject().apply {
                 put("type", "object")
-                put("properties", JSONObject())
             })
         })
 
@@ -116,7 +119,6 @@ class GeminiApiClient(private val context: Context) {
         }
         history.put(userTurn)
 
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=$apiKey"
         var finalReply = ""
 
         while (true) {
@@ -125,19 +127,51 @@ class GeminiApiClient(private val context: Context) {
                 put("tools", getToolsDefinition())
             }
 
-            val request = Request.Builder()
-                .url(url)
-                .post(payload.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            var successResponse: JSONObject? = null
+            var lastErrorMessage = ""
 
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                return@withContext AgentResponse("Error: ${response.code} - $responseBody", logs)
+            // Loop through models and retries for 503 / 429 resilience
+            modelLoop@ for (model in availableModels) {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+
+                for (attempt in 1..2) {
+                    try {
+                        val request = Request.Builder()
+                            .url(url)
+                            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                            .build()
+
+                        val response = client.newCall(request).execute()
+                        val responseBody = response.body?.string() ?: ""
+
+                        if (response.isSuccessful) {
+                            successResponse = JSONObject(responseBody)
+                            break@modelLoop
+                        }
+
+                        if (response.code == 503 || response.code == 429) {
+                            lastErrorMessage = "Google server is experiencing high demand (${response.code})."
+                            delay(1500) // Wait 1.5 seconds and retry
+                            continue
+                        } else {
+                            lastErrorMessage = "Error ${response.code}: $responseBody"
+                            break // Try next model
+                        }
+                    } catch (e: Exception) {
+                        lastErrorMessage = "Connection error: ${e.message}"
+                        delay(1000)
+                    }
+                }
             }
 
-            val resJson = JSONObject(responseBody)
-            val candidates = resJson.optJSONArray("candidates")
+            if (successResponse == null) {
+                return@withContext AgentResponse(
+                    "⚠️ গুগল সার্ভারে এই মুহূর্তে ট্রাফিকের কারণে লোড বেশি রয়েছে। অনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।\n($lastErrorMessage)",
+                    logs
+                )
+            }
+
+            val candidates = successResponse.optJSONArray("candidates")
             if (candidates == null || candidates.length() == 0) {
                 return@withContext AgentResponse("No response received from Gemini.", logs)
             }
@@ -182,7 +216,7 @@ class GeminiApiClient(private val context: Context) {
                     listFiles()
                 }
                 else -> {
-                    logs.add("Unknown tool requested: $fnName")
+                    logs.add("Unknown tool: $fnName")
                     "Unknown tool: $fnName"
                 }
             }
