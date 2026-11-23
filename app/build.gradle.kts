@@ -8,8 +8,17 @@ android {
     namespace = "com.example.geminiagent"
     compileSdk = 35
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("${rootDir}/keystore.jks")
+            storePassword = "geminiagent123"
+            keyAlias = "geminiagent"
+            keyPassword = "geminiagent123"
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.example.geminiagent"
+        applicationId = "com.gr30812.geminiagent"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -19,8 +28,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
