@@ -26,7 +26,7 @@ class AppUpdater(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private val currentVersionCode: Int = try {
+    val currentVersionCode: Int = try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             pInfo.longVersionCode.toInt()
@@ -38,10 +38,26 @@ class AppUpdater(private val context: Context) {
         1
     }
 
+    val currentVersionName: String = try {
+        val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+        pInfo.versionName ?: "1.0.0"
+    } catch (e: Exception) {
+        "1.0.0"
+    }
+
     suspend fun checkUpdate(repoUrl: String): UpdateInfo? = withContext(Dispatchers.IO) {
         return@withContext try {
-            // repoUrl can be the raw link to version.json on GitHub
-            val request = Request.Builder().url(repoUrl).build()
+            // Bust GitHub CDN cache with timestamp query param and no-cache headers
+            val separator = if (repoUrl.contains("?")) "&" else "?"
+            val cacheBustedUrl = "$repoUrl${separator}t=${System.currentTimeMillis()}"
+
+            val request = Request.Builder()
+                .url(cacheBustedUrl)
+                .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                .header("Pragma", "no-cache")
+                .header("Expires", "0")
+                .build()
+
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext null
 
@@ -67,7 +83,11 @@ class AppUpdater(private val context: Context) {
         onProgress: (Float) -> Unit
     ): Result<Unit> = withContext(Dispatchers.IO) {
         return@withContext try {
-            val request = Request.Builder().url(downloadUrl).build()
+            val request = Request.Builder()
+                .url(downloadUrl)
+                .header("Cache-Control", "no-cache")
+                .build()
+
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) return@withContext Result.failure(Exception("HTTP ${response.code}"))
 
@@ -94,7 +114,7 @@ class AppUpdater(private val context: Context) {
                 }
             }
 
-            // Launch package installer on Main thread
+            // Launch system package installer on Main thread
             withContext(Dispatchers.Main) {
                 val apkUri = FileProvider.getUriForFile(
                     context,

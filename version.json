@@ -1,6 +1,6 @@
 {
-  "version_code": 4,
-  "version_name": "1.0.3",
+  "version_code": 5,
+  "version_name": "1.0.4",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "Added View Usage and Rate Limits tracker with circular progress indicators"
+  "changelog": "Pull-to-refresh animation, In-Settings update check, tools schema fix and shell execution"
 }

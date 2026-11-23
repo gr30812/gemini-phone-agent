@@ -26,7 +26,7 @@ class GeminiApiClient(private val context: Context) {
     val usageTracker = UsageTracker(context)
 
     // Available models with fallback
-    private val availableModels = listOf("gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro")
+    private val availableModels = listOf("gemini-2.5-flash", "gemini-3.8-flash", "gemini-2.5-pro")
 
     private fun safePath(path: String): File {
         val target = File(workspaceDir, path).canonicalFile
@@ -65,6 +65,20 @@ class GeminiApiClient(private val context: Context) {
         }
     }
 
+    private fun executeShell(command: String): String {
+        return try {
+            val process = ProcessBuilder("/system/bin/sh", "-c", command)
+                .directory(workspaceDir)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(30, TimeUnit.SECONDS)
+            if (output.isBlank()) "Command executed successfully (no output)." else output
+        } catch (e: Exception) {
+            "Execution error: ${e.message}"
+        }
+    }
+
     private fun getToolsDefinition(): JSONArray {
         val toolsArray = JSONArray()
         val toolObject = JSONObject()
@@ -74,9 +88,12 @@ class GeminiApiClient(private val context: Context) {
             put("name", "read_file")
             put("description", "Reads content from a file in the workspace.")
             put("parameters", JSONObject().apply {
-                put("type", "object")
+                put("type", "OBJECT")
                 put("properties", JSONObject().apply {
-                    put("path", JSONObject().put("type", "string"))
+                    put("path", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "File name or relative path")
+                    })
                 })
                 put("required", JSONArray().put("path"))
             })
@@ -84,12 +101,18 @@ class GeminiApiClient(private val context: Context) {
 
         funcDeclarations.put(JSONObject().apply {
             put("name", "write_file")
-            put("description", "Writes content to a file in the workspace.")
+            put("description", "Writes code or text content to a file in the workspace.")
             put("parameters", JSONObject().apply {
-                put("type", "object")
+                put("type", "OBJECT")
                 put("properties", JSONObject().apply {
-                    put("path", JSONObject().put("type", "string"))
-                    put("content", JSONObject().put("type", "string"))
+                    put("path", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "File name or relative path")
+                    })
+                    put("content", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Content to write into the file")
+                    })
                 })
                 put("required", JSONArray().put("path").put("content"))
             })
@@ -99,11 +122,27 @@ class GeminiApiClient(private val context: Context) {
             put("name", "list_files")
             put("description", "Lists all files in the agent workspace.")
             put("parameters", JSONObject().apply {
-                put("type", "object")
+                put("type", "OBJECT")
+                put("properties", JSONObject())
             })
         })
 
-        toolObject.put("function_declarations", funcDeclarations)
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "execute_command")
+            put("description", "Executes a shell command inside the workspace.")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("command", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "Shell command to run")
+                    })
+                })
+                put("required", JSONArray().put("command"))
+            })
+        })
+
+        toolObject.put("functionDeclarations", funcDeclarations)
         toolsArray.put(toolObject)
         return toolsArray
     }
@@ -113,10 +152,16 @@ class GeminiApiClient(private val context: Context) {
         val logs: List<String>
     )
 
+    fun clearHistory() {
+        while (history.length() > 0) {
+            history.remove(0)
+        }
+    }
+
     suspend fun sendMessage(
         apiKey: String,
         userText: String,
-        selectedModel: String = "gemini-3.8-flash"
+        selectedModel: String = "gemini-2.5-flash"
     ): AgentResponse = withContext(Dispatchers.IO) {
         val logs = mutableListOf<String>()
         val userTurn = JSONObject().apply {
@@ -125,10 +170,11 @@ class GeminiApiClient(private val context: Context) {
         }
         history.put(userTurn)
 
+        // Try selected model first, then fallback models
         val modelsToTry = buildList {
             add(selectedModel)
-            if (selectedModel != "gemini-3.8-flash") add("gemini-3.8-flash")
             if (selectedModel != "gemini-2.5-flash") add("gemini-2.5-flash")
+            if (selectedModel != "gemini-3.8-flash") add("gemini-3.8-flash")
             if (selectedModel != "gemini-2.5-pro") add("gemini-2.5-pro")
         }.distinct()
 
@@ -162,11 +208,13 @@ class GeminiApiClient(private val context: Context) {
                         }
 
                         if (response.code == 503 || response.code == 429) {
-                            lastErrorMessage = "Model $model experiencing high demand (${response.code})."
-                            delay(1500)
+                            lastErrorMessage = "মডেল $model সার্ভার ব্যস্ত (${response.code})"
+                            delay(1000)
                             continue
                         } else {
-                            lastErrorMessage = "Error ${response.code}: $responseBody"
+                            val errJson = try { JSONObject(responseBody).optJSONObject("error") } catch (e: Exception) { null }
+                            val msg = errJson?.optString("message") ?: responseBody
+                            lastErrorMessage = "Error ${response.code}: $msg"
                             break
                         }
                     } catch (e: Exception) {
@@ -178,7 +226,7 @@ class GeminiApiClient(private val context: Context) {
 
             if (successResponse == null) {
                 return@withContext AgentResponse(
-                    "⚠️ সার্ভারে লোড বেশি থাকায় উত্তর পাওয়া যায়নি। কয়েক সেকেন্ড পর আবার চেষ্টা করুন।\n($lastErrorMessage)",
+                    "⚠️ দুঃখিত, রিকোয়েস্টটি সম্পন্ন করা যায়নি। $lastErrorMessage\nঅনুগ্রহ করে কয়েক সেকেন্ড পর আবার চেষ্টা করুন।",
                     logs
                 )
             }
@@ -231,6 +279,11 @@ class GeminiApiClient(private val context: Context) {
                 "list_files" -> {
                     logs.add("Listing files in workspace")
                     listFiles()
+                }
+                "execute_command" -> {
+                    val cmd = fnArgs.optString("command", "")
+                    logs.add("Running command: $cmd")
+                    executeShell(cmd)
                 }
                 else -> {
                     logs.add("Unknown tool: $fnName")

@@ -7,15 +7,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.QueryStats
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +38,7 @@ import com.example.geminiagent.model.MessageSender
 import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import com.example.geminiagent.usage.UsageStats
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 data class ModelOption(
@@ -42,21 +49,21 @@ data class ModelOption(
 )
 
 val AVAILABLE_MODELS = listOf(
-    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High Speed", "গুগলের সবচেয়ে দ্রুত ও লেটেস্ট মডেল"),
-    ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Balanced", "দ্রুত এবং নিখুঁত পারফরম্যান্স"),
+    ModelOption("gemini-2.5-flash", "Gemini 2.5 Flash", "Most Stable", "দ্রুততম এবং সবচেয়ে স্থিতিশীল মডেল"),
+    ModelOption("gemini-3.8-flash", "Gemini 3.8 Flash", "High Speed", "গুগলের লেটেস্ট হাই-স্পিড মডেল"),
     ModelOption("gemini-2.5-pro", "Gemini 2.5 Pro", "Deep Thinking", "জটিল কোডিং এবং গভীর যুক্তি বিশ্লেষণ"),
     ModelOption("gemini-1.5-pro", "Gemini 1.5 Pro", "Stable", "অত্যন্ত নির্ভরযোগ্য ও দীর্ঘ কনটেক্সট")
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun AgentChatScreen(apiClient: GeminiApiClient) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("agent_prefs", Context.MODE_PRIVATE) }
     var apiKey by remember { mutableStateOf(prefs.getString("api_key", "") ?: "") }
-    var githubRepo by remember { mutableStateOf(prefs.getString("github_repo", "") ?: "") }
+    var githubRepo by remember { mutableStateOf(prefs.getString("github_repo", "gr30812/gemini-phone-agent") ?: "gr30812/gemini-phone-agent") }
     var selectedModel by remember {
-        mutableStateOf(prefs.getString("selected_model", "gemini-3.8-flash") ?: "gemini-3.8-flash")
+        mutableStateOf(prefs.getString("selected_model", "gemini-2.5-flash") ?: "gemini-2.5-flash")
     }
 
     var showSettingsDialog by remember { mutableStateOf(apiKey.isEmpty()) }
@@ -65,35 +72,39 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     val updater = remember { AppUpdater(context) }
     var availableUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateCheckResultText by remember { mutableStateOf<String?>(null) }
     var isDownloadingUpdate by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
 
-    var messages by remember {
-        mutableStateOf(
-            listOf(
-                ChatMessage(
-                    sender = MessageSender.AGENT,
-                    text = "স্বাগতম! আমি আপনার নিজস্ব মোবাইল এআই এজেন্ট। আমি ব্যাকগ্রাউন্ডে সক্রিয় আছি। কোড এডিট বা কোনো কাজ করতে বলুন।"
-                )
-            )
-        )
-    }
+    val initialMessage = ChatMessage(
+        sender = MessageSender.AGENT,
+        text = "স্বাগতম! আমি আপনার নিজস্ব মোবাইল এআই এজেন্ট। আমি ব্যাকগ্রাউন্ডে সক্রিয় আছি। কোড লিখতে, ফাইল তৈরি করতে বা যেকোনো কাজ করতে বলুন।"
+    )
+    var messages by remember { mutableStateOf(listOf(initialMessage)) }
 
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Check updates automatically if GitHub repo is configured
-    LaunchedEffect(githubRepo) {
-        if (githubRepo.isNotEmpty()) {
-            val rawVersionUrl = "https://raw.githubusercontent.com/$githubRepo/main/version.json"
-            val update = updater.checkUpdate(rawVersionUrl)
-            if (update != null) {
-                availableUpdate = update
+    // Pull to Refresh Handler
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = {
+            isRefreshing = true
+            scope.launch {
+                delay(400)
+                if (githubRepo.isNotEmpty()) {
+                    val rawUrl = "https://raw.githubusercontent.com/$githubRepo/main/version.json"
+                    availableUpdate = updater.checkUpdate(rawUrl)
+                }
+                delay(300)
+                isRefreshing = false
             }
         }
-    }
+    )
 
     val currentModelOption = AVAILABLE_MODELS.find { it.id == selectedModel } ?: AVAILABLE_MODELS[0]
 
@@ -103,7 +114,6 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 title = {
                     Column {
                         Text("Gemini Phone Agent", fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        // Clickable Model Selector Chip
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -132,6 +142,14 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     }
                 },
                 actions = {
+                    // Clear Chat icon
+                    IconButton(onClick = {
+                        apiClient.clearHistory()
+                        messages = listOf(initialMessage)
+                    }) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.LightGray)
+                    }
+                    // Settings icon
                     IconButton(onClick = { showSettingsDialog = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
                     }
@@ -149,88 +167,47 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Update Banner if available
-            availableUpdate?.let { update ->
-                Surface(
-                    color = Color(0xFF1E3A8A),
-                    modifier = Modifier.fillMaxWidth()
+            // Main Chat Area with Pull-To-Refresh Box
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .pullRefresh(pullRefreshState)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "🚀 নতুন আপডেট (${update.versionName}) প্রস্তুত!",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                update.changelog,
-                                color = Color(0xFF93C5FD),
-                                fontSize = 11.sp,
-                                maxLines = 1
-                            )
-                        }
-                        if (isDownloadingUpdate) {
-                            CircularProgressIndicator(
-                                progress = { downloadProgress },
-                                modifier = Modifier.size(24.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Button(
-                                onClick = {
-                                    isDownloadingUpdate = true
-                                    scope.launch {
-                                        updater.downloadAndInstall(
-                                            update.downloadUrl,
-                                            onProgress = { downloadProgress = it }
-                                        )
-                                        isDownloadingUpdate = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                modifier = Modifier.height(32.dp)
+                    items(messages, key = { it.id }) { msg ->
+                        ChatBubble(msg)
+                    }
+                    if (isLoading) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("আপডেট করুন", fontSize = 12.sp)
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("${currentModelOption.displayName} কাজ করছে...", fontSize = 13.sp, color = Color.Gray)
                             }
                         }
                     }
                 }
-            }
 
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                state = listState,
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    ChatBubble(msg)
-                }
-                if (isLoading) {
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("${currentModelOption.displayName} কাজ করছে...", fontSize = 13.sp, color = Color.Gray)
-                        }
-                    }
-                }
+                // Pull-To-Refresh Animated Spinner at Top Center
+                PullRefreshIndicator(
+                    refreshing = isRefreshing,
+                    state = pullRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    backgroundColor = Color(0xFF2563EB),
+                    contentColor = Color.White
+                )
             }
 
             // Input Area
@@ -249,7 +226,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         value = inputText,
                         onValueChange = { inputText = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("এজেন্টকে নির্দেশনা দিন...", color = Color.Gray) },
+                        placeholder = { Text("এজেন্টকে কোনো কাজ দিন...", color = Color.Gray) },
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color(0xFF2A2A2A),
                             unfocusedContainerColor = Color(0xFF2A2A2A),
@@ -460,7 +437,6 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // Daily Limit Row
                     UsageLimitRow(
                         title = "Daily limit",
                         resetsIn = stats.dailyResetsIn,
@@ -471,7 +447,6 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // 5h Limit Row
                     UsageLimitRow(
                         title = "5h rolling limit",
                         resetsIn = stats.fiveHourResetsIn,
@@ -502,7 +477,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         )
     }
 
-    // Settings Dialog
+    // Settings Dialog (With In-Settings Update Check)
     if (showSettingsDialog) {
         var tempKey by remember { mutableStateOf(apiKey) }
         var tempRepo by remember { mutableStateOf(githubRepo) }
@@ -520,9 +495,8 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text("২. GitHub Repo (OTA আপডেটের জন্য):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Format: username/repo-name", fontSize = 11.sp, color = Color.Gray)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("২. GitHub Repo (আপডেটের জন্য):", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     OutlinedTextField(
                         value = tempRepo,
                         onValueChange = { tempRepo = it },
@@ -530,6 +504,91 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = Color(0xFF333333))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // IN-SETTINGS UPDATE SECTION
+                    Text("৩. অ্যাপ ভার্সন ও আপডেট:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("বর্তমান ভার্সন: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
+
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    isCheckingUpdate = true
+                                    updateCheckResultText = null
+                                    scope.launch {
+                                        val rawUrl = "https://raw.githubusercontent.com/$tempRepo/main/version.json"
+                                        val update = updater.checkUpdate(rawUrl)
+                                        isCheckingUpdate = false
+                                        if (update != null) {
+                                            availableUpdate = update
+                                            updateCheckResultText = "🚀 নতুন আপডেট পাওয়া গেছে (${update.versionName})!"
+                                        } else {
+                                            updateCheckResultText = "✅ আপনার অ্যাপটি সর্বশেষ ভার্সনে আছে!"
+                                        }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = "Check", modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Check Update", fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    updateCheckResultText?.let { msg ->
+                        Text(
+                            text = msg,
+                            color = if (availableUpdate != null) Color(0xFF38BDF8) else Color(0xFF4ADE80),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+
+                    // Download update button if available
+                    availableUpdate?.let { update ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (isDownloadingUpdate) {
+                            Column {
+                                LinearProgressIndicator(
+                                    progress = { downloadProgress },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Color(0xFF2563EB)
+                                )
+                                Text("ডাউনলোড হচ্ছে: ${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    isDownloadingUpdate = true
+                                    scope.launch {
+                                        updater.downloadAndInstall(
+                                            update.downloadUrl,
+                                            onProgress = { downloadProgress = it }
+                                        )
+                                        isDownloadingUpdate = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                            ) {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("এখনই আপডেট করুন (${update.versionName})")
+                            }
+                        }
+                    }
                 }
             },
             confirmButton = {
