@@ -22,6 +22,8 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -38,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -120,6 +123,28 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    var showAddContextSheet by remember { mutableStateOf(false) }
+    var showCommandPalette by remember { mutableStateOf(false) }
+    var showSideQuestionDialog by remember { mutableStateOf(false) }
+    var sideQuestionText by remember { mutableStateOf("") }
+    var sideQuestionAnswer by remember { mutableStateOf<String?>(null) }
+    var isSideQuestionLoading by remember { mutableStateOf(false) }
+    var showNewProjectDialog by remember { mutableStateOf(false) }
+    var newProjectName by remember { mutableStateOf("") }
+    var currentProject by remember { mutableStateOf("swarm/swarm_board") }
+    var paletteSearchQuery by remember { mutableStateOf("") }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "attached_file"
+            inputText = if (inputText.isBlank()) "@file: $fileName " else "$inputText @file: $fileName "
+            Toast.makeText(context, "Attached $fileName to context", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Send Message Handler
     fun doSendMessage(promptText: String) {
         val trimmed = promptText.trim()
@@ -198,74 +223,195 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     val currentModelOption = ANTIGRAVITY_MODELS.find { it.id == selectedModel } ?: ANTIGRAVITY_MODELS[0]
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFF2563EB).copy(alpha = 0.2f),
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.AutoAwesome,
-                                    contentDescription = "Antigravity",
-                                    tint = Color(0xFF38BDF8),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Antigravity Agent", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = Color(0xFF1E293B)
-                                ) {
-                                    Text("v${updater.currentVersionName}", fontSize = 9.5.sp, color = Color(0xFF7DD3FC), modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .background(Color(0xFF4ADE80), CircleShape)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text("Background Active", fontSize = 10.5.sp, color = Color(0xFF4ADE80))
-                            }
-                        }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Color(0xFF131315),
+                drawerContentColor = Color.White,
+                modifier = Modifier.width(285.dp)
+            ) {
+                AntigravityDrawerContent(
+                    currentProject = currentProject,
+                    onSelectGeneral = {
+                        scope.launch { drawerState.close() }
+                        showSettingsDialog = true
+                    },
+                    onSelectApplication = {
+                        scope.launch { drawerState.close() }
+                        showSettingsDialog = true
+                    },
+                    onSelectAppearance = {
+                        scope.launch { drawerState.close() }
+                        Toast.makeText(context, "Appearance: JetBrains Dark (System)", Toast.LENGTH_SHORT).show()
+                    },
+                    onSelectShortcuts = {
+                        scope.launch { drawerState.close() }
+                        showAddContextSheet = true
+                    },
+                    onSelectNotifications = {
+                        scope.launch { drawerState.close() }
+                        OSPermissionsManager.openNotificationSettings(context)
+                    },
+                    onSelectModels = {
+                        scope.launch { drawerState.close() }
+                        showModelBottomSheet = true
+                    },
+                    onSelectBrowser = {
+                        scope.launch { drawerState.close() }
+                        showCommandPalette = true
+                    },
+                    onSelectProject = {
+                        scope.launch { drawerState.close() }
+                        showNewProjectDialog = true
+                    },
+                    onSelectConversations = {
+                        scope.launch { drawerState.close() }
                         apiClient.clearHistory()
                         messages = listOf(initialMessage)
-                        Toast.makeText(context, "Chat history cleared", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.LightGray)
+                        Toast.makeText(context, "New conversation started", Toast.LENGTH_SHORT).show()
+                    },
+                    onGiveFeedback = {
+                        scope.launch { drawerState.close() }
+                        Toast.makeText(context, "Feedback: Antigravity Mobile IDE v${updater.currentVersionName}", Toast.LENGTH_SHORT).show()
                     }
-                    IconButton(onClick = { showSettingsDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF131314),
-                    titleContentColor = Color.White
                 )
-            )
-        },
-        containerColor = Color(0xFF0F0F10)
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Color.White)
+                        }
+                    },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF2563EB).copy(alpha = 0.2f),
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.AutoAwesome,
+                                        contentDescription = "Antigravity",
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Antigravity Agent", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFF1E293B)
+                                    ) {
+                                        Text("v${updater.currentVersionName}", fontSize = 9.5.sp, color = Color(0xFF7DD3FC), modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                    }
+                                }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(Color(0xFF4ADE80), CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text("Background Active", fontSize = 10.5.sp, color = Color(0xFF4ADE80))
+                                }
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showCommandPalette = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search & Context", tint = Color.LightGray)
+                        }
+                        IconButton(onClick = {
+                            apiClient.clearHistory()
+                            messages = listOf(initialMessage)
+                            Toast.makeText(context, "Chat history cleared", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear Chat", tint = Color.LightGray)
+                        }
+                        IconButton(onClick = { showSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.LightGray)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color(0xFF131314),
+                        titleContentColor = Color.White
+                    )
+                )
+            },
+            containerColor = Color(0xFF0F0F10)
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                // Antigravity Projects Bar (Matching Image 4)
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    color = Color(0xFF141417),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color(0xFF232328))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { showNewProjectDialog = true }
+                        ) {
+                            Text(
+                                "Projects",
+                                color = Color(0xFFE4E4E7),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = Color(0xFF27272A)
+                            ) {
+                                Text(
+                                    currentProject,
+                                    fontSize = 10.5.sp,
+                                    color = Color(0xFF38BDF8),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = { Toast.makeText(context, "Active project: $currentProject", Toast.LENGTH_SHORT).show() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.FilterList, contentDescription = "Filter", tint = Color.LightGray, modifier = Modifier.size(17.dp))
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(
+                                onClick = { showNewProjectDialog = true },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.CreateNewFolder, contentDescription = "New Project", tint = Color(0xFF38BDF8), modifier = Modifier.size(17.dp))
+                            }
+                        }
+                    }
+                }
             // Main Chat Stream with Pull-To-Refresh
             Box(
                 modifier = Modifier
@@ -394,13 +540,13 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     ) {
                         // Left Group: + Button & Model Pill
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // + Action Button
+                            // + Action Button (Add Context)
                             Surface(
                                 shape = CircleShape,
                                 color = Color(0xFF282A2D),
                                 modifier = Modifier
                                     .size(32.dp)
-                                    .clickable { showQuickActionsSheet = true }
+                                    .clickable { showAddContextSheet = true }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
@@ -512,6 +658,384 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 }
             }
         }
+    }
+    } // Closes ModalNavigationDrawer
+
+    // Antigravity "Add Context" BottomSheet (Matching Image 1)
+    if (showAddContextSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAddContextSheet = false },
+            containerColor = Color(0xFF18181B),
+            scrimColor = Color.Black.copy(alpha = 0.65f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text("Add Context", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                AddContextItem(
+                    icon = Icons.Default.AttachFile,
+                    title = "Files",
+                    subtitle = "Attach local file to prompt context",
+                    tint = Color(0xFF38BDF8)
+                ) {
+                    showAddContextSheet = false
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                }
+
+                AddContextItem(
+                    icon = Icons.Default.Folder,
+                    title = "Folder",
+                    subtitle = "Attach workspace folder path",
+                    tint = Color(0xFFFBBF24)
+                ) {
+                    showAddContextSheet = false
+                    inputText = if (inputText.isBlank()) "@folder: workspace/ " else "$inputText @folder: workspace/ "
+                }
+
+                AddContextItem(
+                    icon = Icons.Default.AlternateEmail,
+                    title = "Mentions",
+                    subtitle = "@agent, @os, @adb, @workspace",
+                    tint = Color(0xFFA78BFA)
+                ) {
+                    showAddContextSheet = false
+                    inputText = if (inputText.isBlank()) "@agent " else "$inputText @agent "
+                }
+
+                AddContextItem(
+                    icon = Icons.Default.NorthEast,
+                    title = "Actions",
+                    subtitle = "Terminal commands, usage & OS permissions",
+                    tint = Color(0xFF34D399)
+                ) {
+                    showAddContextSheet = false
+                    showQuickActionsSheet = true
+                }
+
+                AddContextItem(
+                    icon = Icons.Default.Language,
+                    title = "Browser",
+                    subtitle = "Search web or browse URL context",
+                    tint = Color(0xFF60A5FA)
+                ) {
+                    showAddContextSheet = false
+                    showCommandPalette = true
+                }
+
+                AddContextItem(
+                    icon = Icons.Default.ChangeHistory,
+                    title = "Drive",
+                    subtitle = "Google Drive cloud files sync",
+                    tint = Color(0xFFF43F5E),
+                    trailingBadge = "Set up"
+                ) {
+                    Toast.makeText(context, "Google Drive workspace integration", Toast.LENGTH_SHORT).show()
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // Antigravity Command Palette & Context Search BottomSheet (Matching Image 2)
+    if (showCommandPalette) {
+        ModalBottomSheet(
+            onDismissRequest = { showCommandPalette = false },
+            containerColor = Color(0xFF131316),
+            scrimColor = Color.Black.copy(alpha = 0.65f)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            ) {
+                // Search or enter a URL
+                OutlinedTextField(
+                    value = paletteSearchQuery,
+                    onValueChange = { paletteSearchQuery = it },
+                    placeholder = { Text("Search or enter a URL", color = Color(0xFF71717A), fontSize = 13.5.sp) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(25.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF1A1A1E),
+                        unfocusedContainerColor = Color(0xFF1A1A1E),
+                        focusedBorderColor = Color(0xFF2563EB),
+                        unfocusedBorderColor = Color(0xFF2D2D33),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        if (paletteSearchQuery.isNotBlank()) {
+                            val q = paletteSearchQuery
+                            paletteSearchQuery = ""
+                            showCommandPalette = false
+                            doSendMessage("Search or browse URL: $q")
+                        }
+                    })
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                PaletteActionRow(icon = Icons.Default.Description, title = "Open File") {
+                    showCommandPalette = false
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                }
+                PaletteActionRow(icon = Icons.Default.Language, title = "Browser") {
+                    showCommandPalette = false
+                    if (paletteSearchQuery.isNotBlank()) {
+                        doSendMessage("Browse and summarize web content for: $paletteSearchQuery")
+                        paletteSearchQuery = ""
+                    } else {
+                        inputText = "Browse: https://"
+                    }
+                }
+                PaletteActionRow(icon = Icons.Default.ChatBubbleOutline, title = "Side Question") {
+                    showCommandPalette = false
+                    showSideQuestionDialog = true
+                }
+                PaletteActionRow(icon = Icons.Default.Extension, title = "Extensions", trailingIcon = Icons.Default.ChevronRight) {
+                    showCommandPalette = false
+                    showPermissionsSheet = true
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Background Tasks (Badge 51)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Background Tasks", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF27272A)
+                    ) {
+                        Text("51", fontSize = 10.sp, color = Color(0xFFE4E4E7), modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            Toast.makeText(context, "Running task active in background", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(">_  ", color = Color(0xFF38BDF8), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text("Run Android Studio installer silently", color = Color(0xFFE4E4E7), fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                }
+                Text(
+                    "See all",
+                    color = Color(0xFF38BDF8),
+                    fontSize = 11.5.sp,
+                    modifier = Modifier
+                        .clickable { Toast.makeText(context, "Viewing all background tasks", Toast.LENGTH_SHORT).show() }
+                        .padding(vertical = 4.dp)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Uploads (Badge 24)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Uploads", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF94A3B8))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF27272A)
+                    ) {
+                        Text("24", fontSize = 10.sp, color = Color(0xFFE4E4E7), modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val sampleUploads = listOf(
+                    "Media 1795471288010 Ea02b769",
+                    "Media 1795471000073 43e29f60",
+                    "Media 1795470992174 Aed56450",
+                    "Media 1795470984014 F701566c"
+                )
+                sampleUploads.forEach { item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                inputText = if (inputText.isBlank()) "@upload: $item " else "$inputText @upload: $item "
+                                showCommandPalette = false
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(item, color = Color.LightGray, fontSize = 12.sp)
+                    }
+                }
+                Text(
+                    "See all",
+                    color = Color(0xFF38BDF8),
+                    fontSize = 11.5.sp,
+                    modifier = Modifier
+                        .clickable { Toast.makeText(context, "Viewing all uploads", Toast.LENGTH_SHORT).show() }
+                        .padding(vertical = 4.dp)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+            }
+        }
+    }
+
+    // Side Question Dialog
+    if (showSideQuestionDialog) {
+        AlertDialog(
+            onDismissRequest = { showSideQuestionDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ChatBubbleOutline, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Side Question", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "Ask a quick question without affecting the main conversation thread.",
+                        fontSize = 11.5.sp,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = sideQuestionText,
+                        onValueChange = { sideQuestionText = it },
+                        placeholder = { Text("Type your side question...", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 4,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                    if (isSideQuestionLoading) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Color(0xFF38BDF8))
+                    }
+                    if (sideQuestionAnswer != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF27272A),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                sideQuestionAnswer ?: "",
+                                color = Color(0xFFE4E4E7),
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (sideQuestionText.isNotBlank()) {
+                            isSideQuestionLoading = true
+                            sideQuestionAnswer = null
+                            scope.launch {
+                                val resp = apiClient.sendMessage(apiKey, "Side Question (be concise): $sideQuestionText", selectedModel)
+                                sideQuestionAnswer = resp.text
+                                isSideQuestionLoading = false
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text("Ask", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSideQuestionDialog = false
+                    sideQuestionText = ""
+                    sideQuestionAnswer = null
+                }) {
+                    Text("Close", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E1E22)
+        )
+    }
+
+    // New Project Dialog
+    if (showNewProjectDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewProjectDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Switch or Create Project", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "Current active workspace project:",
+                        fontSize = 11.5.sp,
+                        color = Color.LightGray
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        currentProject,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF38BDF8)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = newProjectName,
+                        onValueChange = { newProjectName = it },
+                        placeholder = { Text("Enter new project name...", color = Color.Gray) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newProjectName.isNotBlank()) {
+                            currentProject = newProjectName.trim()
+                            newProjectName = ""
+                            showNewProjectDialog = false
+                            Toast.makeText(context, "Switched project to: $currentProject", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                ) {
+                    Text("Select / Create", color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewProjectDialog = false }) {
+                    Text("Cancel", color = Color.Gray)
+                }
+            },
+            containerColor = Color(0xFF1E1E22)
+        )
     }
 
     // Quick Actions Sheet (+ Button)
@@ -1377,6 +1901,247 @@ fun OSPermissionRow(
                 }
             } else {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4ADE80), modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun AntigravityDrawerContent(
+    currentProject: String,
+    onSelectGeneral: () -> Unit,
+    onSelectApplication: () -> Unit,
+    onSelectAppearance: () -> Unit,
+    onSelectShortcuts: () -> Unit,
+    onSelectNotifications: () -> Unit,
+    onSelectModels: () -> Unit,
+    onSelectBrowser: () -> Unit,
+    onSelectProject: () -> Unit,
+    onSelectConversations: () -> Unit,
+    onGiveFeedback: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxHeight()
+            .padding(vertical = 16.dp, horizontal = 12.dp)
+    ) {
+        // Settings Section Header
+        Text(
+            "Settings",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF71717A),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+
+        // Navigation Items (Matching Image 3)
+        DrawerNavItem(title = "General", isSelected = true, onClick = onSelectGeneral)
+        DrawerNavItem(title = "Application", isSelected = false, onClick = onSelectApplication)
+        DrawerNavItem(title = "Appearance", isSelected = false, onClick = onSelectAppearance)
+        DrawerNavItem(title = "Shortcuts", isSelected = false, onClick = onSelectShortcuts)
+        DrawerNavItem(title = "Notifications", isSelected = false, onClick = onSelectNotifications)
+        DrawerNavItem(title = "Models", isSelected = false, onClick = onSelectModels)
+        DrawerNavItem(title = "Browser", isSelected = false, onClick = onSelectBrowser)
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Projects Section
+        Text(
+            "Projects",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF71717A),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+        DrawerNavItem(
+            title = currentProject,
+            isSelected = false,
+            leadingIcon = Icons.Default.Folder,
+            onClick = onSelectProject
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Not in Project Section
+        Text(
+            "Not in Project",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF71717A),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        )
+        DrawerNavItem(
+            title = "Conversations",
+            isSelected = false,
+            leadingIcon = Icons.Default.ChatBubbleOutline,
+            onClick = onSelectConversations
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        DrawerNavItem(
+            title = "Give Feedback",
+            isSelected = false,
+            onClick = onGiveFeedback
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        HorizontalDivider(color = Color(0xFF27272A), thickness = 1.dp)
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Profile Tile (Matching Image 3: George Roy / gr30812@gmail.com)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color(0xFF2563EB),
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        "GR",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+                Text(
+                    "George Roy",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Text(
+                    "gr30812@gmail.com",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DrawerNavItem(
+    title: String,
+    isSelected: Boolean,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+            .clickable { onClick() },
+        color = if (isSelected) Color(0xFF27272A) else Color.Transparent,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (leadingIcon != null) {
+                Icon(
+                    leadingIcon,
+                    contentDescription = null,
+                    tint = if (isSelected) Color.White else Color(0xFF9CA3AF),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+            Text(
+                title,
+                color = if (isSelected) Color.White else Color(0xFFD4D4D8),
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+fun AddContextItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    tint: Color,
+    trailingBadge: String? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable { onClick() },
+        color = Color(0xFF202024),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                Text(subtitle, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+            }
+            if (trailingBadge != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E293B)
+                ) {
+                    Text(
+                        trailingBadge,
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PaletteActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    trailingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable { onClick() },
+        color = Color.Transparent,
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = Color(0xFFE4E4E7), modifier = Modifier.size(17.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(title, color = Color(0xFFE4E4E7), fontSize = 13.sp, modifier = Modifier.weight(1f))
+            if (trailingIcon != null) {
+                Icon(trailingIcon, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
             }
         }
     }

@@ -1,6 +1,6 @@
 {
-  "version_code": 10,
-  "version_name": "1.0.9",
+  "version_code": 11,
+  "version_name": "1.0.10",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "Added Shizuku elevated ADB shell bridge for non-root screen tapping, swipe gestures, hardware key events, screenshots, and package management"
+  "changelog": "Added Antigravity IDE UI: Add Context menu (Files, Folder, Mentions, Actions, Browser, Drive), Command Palette / Context Search sheet with Background Tasks & Uploads, Antigravity Navigation Drawer, and Projects Header Bar"
 }
