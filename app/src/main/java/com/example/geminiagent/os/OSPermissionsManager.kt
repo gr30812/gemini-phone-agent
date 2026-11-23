@@ -14,7 +14,9 @@ data class PermissionStatus(
     val contactsPermission: Boolean,
     val phoneCallPermission: Boolean,
     val smsPermission: Boolean,
-    val audioRecordPermission: Boolean
+    val audioRecordPermission: Boolean,
+    val shizukuRunning: Boolean,
+    val shizukuPermission: Boolean
 ) {
     val allGranted: Boolean
         get() = notificationAccess && accessibilityService && contactsPermission && phoneCallPermission && smsPermission && audioRecordPermission
@@ -38,7 +40,9 @@ object OSPermissionsManager {
             phoneCallPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED,
             smsPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED &&
                     ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED,
-            audioRecordPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            audioRecordPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED,
+            shizukuRunning = ShizukuBridge.isShizukuRunning(),
+            shizukuPermission = ShizukuBridge.hasPermission()
         )
     }
 

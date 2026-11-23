@@ -45,6 +45,7 @@ import com.example.geminiagent.api.GeminiApiClient
 import com.example.geminiagent.model.ChatMessage
 import com.example.geminiagent.model.MessageSender
 import com.example.geminiagent.os.OSPermissionsManager
+import com.example.geminiagent.os.ShizukuBridge
 import com.example.geminiagent.updater.AppUpdater
 import com.example.geminiagent.updater.UpdateInfo
 import com.example.geminiagent.usage.UsageStats
@@ -975,6 +976,30 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     buttonText = "Grant Permissions",
                     onAction = {
                         requestRuntimePermissionsLauncher.launch(OSPermissionsManager.REQUIRED_RUNTIME_PERMISSIONS)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 4. Shizuku ADB Elevated Shell Bridge
+                OSPermissionRow(
+                    title = "Shizuku ADB Elevated Shell",
+                    description = if (permStatus.shizukuRunning) {
+                        if (permStatus.shizukuPermission) "Elevated ADB shell active (input tap, keyevent, pm, screencap)"
+                        else "Shizuku is running. Tap to authorize elevated ADB bridge."
+                    } else {
+                        "Non-root ADB bridge. Tap to launch Shizuku and start via Wireless Debugging."
+                    },
+                    isGranted = permStatus.shizukuPermission,
+                    buttonText = if (permStatus.shizukuRunning) {
+                        if (permStatus.shizukuPermission) "Authorized" else "Authorize"
+                    } else "Open Shizuku",
+                    onAction = {
+                        if (permStatus.shizukuRunning) {
+                            ShizukuBridge.requestPermission()
+                        } else {
+                            ShizukuBridge.openShizukuApp(context)
+                        }
                     }
                 )
 

@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.geminiagent.os.AgentAccessibilityService
 import com.example.geminiagent.os.AgentNotificationListenerService
 import com.example.geminiagent.os.DeviceBridge
+import com.example.geminiagent.os.ShizukuBridge
 import com.example.geminiagent.usage.UsageTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -350,6 +351,22 @@ class GeminiApiClient(private val context: Context) {
             })
         })
 
+        // 17. execute_adb_command
+        funcDeclarations.put(JSONObject().apply {
+            put("name", "execute_adb_command")
+            put("description", "Executes an elevated ADB shell command via Shizuku without root (e.g. 'input tap x y', 'input swipe x1 y1 x2 y2 duration', 'input text <text>', 'input keyevent <KEYCODE>', 'screencap -p /sdcard/Download/screen.png', 'pm list packages', 'dumpsys', 'am start').")
+            put("parameters", JSONObject().apply {
+                put("type", "OBJECT")
+                put("properties", JSONObject().apply {
+                    put("command", JSONObject().apply {
+                        put("type", "STRING")
+                        put("description", "The ADB shell command to execute")
+                    })
+                })
+                put("required", JSONArray().put("command"))
+            })
+        })
+
         toolObject.put("functionDeclarations", funcDeclarations)
         toolsArray.put(toolObject)
         return toolsArray
@@ -397,6 +414,7 @@ class GeminiApiClient(private val context: Context) {
                         "You can reply to chats using 'reply_to_notification'. " +
                         "You can inspect the screen with 'read_screen_content', tap on elements with 'click_screen_element', and navigate with 'perform_device_action'. " +
                         "You can open apps with 'open_app', lookup contacts with 'read_contacts', make calls with 'make_phone_call', read and send SMS with 'read_recent_sms' and 'send_sms', set alarms with 'set_alarm', and check battery/RAM with 'get_device_status'. " +
+                        "You can also run elevated ADB shell commands without root via Shizuku using 'execute_adb_command' (e.g. precise screen taps 'input tap x y', swipes, hardware key events, screenshots, package management 'pm', and activity manager 'am'). " +
                         "You can also write and execute scripts with 'read_file', 'write_file', 'list_files', and 'execute_command'. " +
                         "Always execute tools directly to perform the requested actions and provide concise, helpful answers in English.")
             }))
@@ -603,6 +621,11 @@ class GeminiApiClient(private val context: Context) {
                 "get_device_status" -> {
                     logs.add("Reading battery, network, storage and RAM")
                     DeviceBridge.getDeviceStatus(context)
+                }
+                "execute_adb_command" -> {
+                    val cmd = fnArgs.optString("command", "")
+                    logs.add("Executing ADB command via Shizuku: $cmd")
+                    ShizukuBridge.executeAdbCommand(cmd)
                 }
                 else -> {
                     logs.add("Unknown tool: $fnName")

@@ -21,8 +21,8 @@ android {
         applicationId = "com.gr30812.geminiagent"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 10
+        versionName = "1.0.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -69,4 +69,9 @@ dependencies {
     // Coroutines & Networking (OkHttp)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Shizuku Elevated ADB Bridge
+    val shizukuVersion = "13.1.5"
+    implementation("dev.rikka.shizuku:api:$shizukuVersion")
+    implementation("dev.rikka.shizuku:provider:$shizukuVersion")
 }
