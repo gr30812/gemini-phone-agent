@@ -1,4 +1,4 @@
-﻿package com.example.geminiagent.ui
+package com.example.geminiagent.ui
 
 import android.Manifest
 import android.content.Context
@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.foundation.text.KeyboardActions
@@ -808,68 +809,68 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                Text("Add Context", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    "Add Context",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF94A3B8),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
 
                 AddContextItem(
                     icon = Icons.Default.AttachFile,
                     title = "Files",
-                    subtitle = "Attach local file to prompt context",
-                    tint = Color(0xFF38BDF8)
-                ) {
-                    showAddContextSheet = false
-                    filePickerLauncher.launch(arrayOf("*/*"))
-                }
+                    onClick = {
+                        showAddContextSheet = false
+                        filePickerLauncher.launch(arrayOf("*/*"))
+                    }
+                )
 
                 AddContextItem(
                     icon = Icons.Default.Folder,
                     title = "Folder",
-                    subtitle = "Attach workspace folder path",
-                    tint = Color(0xFFFBBF24)
-                ) {
-                    showAddContextSheet = false
-                    inputText = if (inputText.isBlank()) "@folder: workspace/ " else "$inputText @folder: workspace/ "
-                }
+                    onClick = {
+                        showAddContextSheet = false
+                        inputText = if (inputText.isBlank()) "@folder: workspace/ " else "$inputText @folder: workspace/ "
+                    }
+                )
 
                 AddContextItem(
                     icon = Icons.Default.AlternateEmail,
                     title = "Mentions",
-                    subtitle = "@agent, @os, @adb, @workspace",
-                    tint = Color(0xFFA78BFA)
-                ) {
-                    showAddContextSheet = false
-                    inputText = if (inputText.isBlank()) "@agent " else "$inputText @agent "
-                }
+                    onClick = {
+                        showAddContextSheet = false
+                        inputText = if (inputText.isBlank()) "@agent " else "$inputText @agent "
+                    }
+                )
 
                 AddContextItem(
                     icon = Icons.Default.NorthEast,
                     title = "Actions",
-                    subtitle = "Terminal commands, usage & OS permissions",
-                    tint = Color(0xFF34D399)
-                ) {
-                    showAddContextSheet = false
-                    showQuickActionsSheet = true
-                }
+                    onClick = {
+                        showAddContextSheet = false
+                        showQuickActionsSheet = true
+                    }
+                )
 
                 AddContextItem(
                     icon = Icons.Default.Language,
                     title = "Browser",
-                    subtitle = "Search web or browse URL context",
-                    tint = Color(0xFF60A5FA)
-                ) {
-                    showAddContextSheet = false
-                    showCommandPalette = true
-                }
+                    onClick = {
+                        showAddContextSheet = false
+                        showCommandPalette = true
+                    }
+                )
 
                 AddContextItem(
                     icon = Icons.Default.ChangeHistory,
                     title = "Drive",
-                    subtitle = "Google Drive cloud files sync",
-                    tint = Color(0xFFF43F5E),
-                    trailingBadge = "Set up"
-                ) {
-                    Toast.makeText(context, "Google Drive workspace integration", Toast.LENGTH_SHORT).show()
-                }
+                    trailingBadge = "Set up",
+                    onClick = {
+                        Toast.makeText(context, "Google Drive workspace integration setup", Toast.LENGTH_SHORT).show()
+                    }
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
             }
@@ -1208,7 +1209,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     showQuickActionsSheet = false
                     showSwarmBoardDialog = true
                 }
-                QuickActionItem(icon = Icons.Default.MenuBook, title = "Knowledge Base", subtitle = "View and edit long-term agent memory and rules") {
+                QuickActionItem(icon = Icons.AutoMirrored.Filled.MenuBook, title = "Knowledge Base", subtitle = "View and edit long-term agent memory and rules") {
                     showQuickActionsSheet = false
                     showKnowledgeBaseDialog = true
                 }
@@ -2574,7 +2575,7 @@ fun AntigravityDrawerContent(
         DrawerNavItem(
             title = "Knowledge Base",
             isSelected = false,
-            leadingIcon = Icons.Default.MenuBook,
+            leadingIcon = Icons.AutoMirrored.Filled.MenuBook,
             onClick = onSelectKnowledge
         )
         DrawerNavItem(
@@ -2697,44 +2698,49 @@ fun DrawerNavItem(
 fun AddContextItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    subtitle: String,
-    tint: Color,
+    subtitle: String = "",
+    tint: Color = Color(0xFFCBD5E1),
     trailingBadge: String? = null,
     onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp)
+            .padding(vertical = 1.dp)
             .clickable { onClick() },
-        color = Color(0xFF202024),
-        shape = RoundedCornerShape(10.dp)
+        color = Color.Transparent,
+        shape = RoundedCornerShape(8.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
-                Text(subtitle, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+            if (subtitle.isBlank()) {
+                Text(
+                    title,
+                    color = Color(0xFFE4E4E7),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.5.sp,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                    Text(subtitle, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+                }
             }
             if (trailingBadge != null) {
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E293B)
-                ) {
-                    Text(
-                        trailingBadge,
-                        color = Color(0xFF38BDF8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                    )
-                }
+                Text(
+                    trailingBadge,
+                    color = Color(0xFF38BDF8),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clickable { onClick() }
+                )
             }
         }
     }
@@ -2966,7 +2972,7 @@ fun KnowledgeBaseDialog(
         shape = RoundedCornerShape(16.dp),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
+                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = Color(0xFFA78BFA), modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Knowledge Base", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }

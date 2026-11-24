@@ -1,6 +1,6 @@
 {
-  "version_code": 15,
-  "version_name": "1.0.14",
+  "version_code": 16,
+  "version_name": "1.0.15",
   "apk_url": "https://github.com/gr30812/gemini-phone-agent/releases/download/latest/GeminiAgent.apk",
-  "changelog": "Nord Voice Assistant: Default System Assistant integration (Power hold / corner swipe), Wake Word Detection ('Nord' -> Agent responds 'Sir!' & listens), VoiceTtsManager offline speech feedback, and VoiceAssistActivity floating UI."
+  "changelog": "Antigravity Mobile IDE Suite & Motion Graphics: Antigravity Add Context Menu (Files, Folder, Mentions, Actions, Browser, Drive setup), Antigravity Omnibar & Command Palette (Search/URL, Open File, Browser, Side Question, Extensions, Background Tasks count, Uploads count), Antigravity Navigation Drawer with Settings & George Roy profile, Projects bar with Filter and New Folder, Live Audio Waveform Visualizer, Dynamic Thinking Orb with live stopwatch timer, and persistent Chat History."
 }

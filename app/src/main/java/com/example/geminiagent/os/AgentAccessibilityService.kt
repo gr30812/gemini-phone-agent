@@ -91,12 +91,10 @@ class AgentAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 traverse(child, depth + 1)
-                child.recycle()
             }
         }
 
         traverse(root, 0)
-        root.recycle()
         return if (sb.length > 50) sb.toString() else "Screen appears empty or elements are non-readable."
     }
 
@@ -130,7 +128,6 @@ class AgentAccessibilityService : AccessibilityService() {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 find(child)
-                if (foundNode == null) child.recycle()
             }
         }
 
@@ -138,10 +135,8 @@ class AgentAccessibilityService : AccessibilityService() {
 
         return if (foundNode != null) {
             val clicked = foundNode!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            foundNode!!.recycle()
             if (clicked) "Successfully clicked on '$targetTextOrId'" else "Failed to click on '$targetTextOrId'"
         } else {
-            root.recycle()
             "Element matching '$targetTextOrId' not found on screen."
         }
     }

@@ -32,7 +32,7 @@ object AutomationManager {
                         prompt = obj.getString("prompt"),
                         isEnabled = obj.optBoolean("isEnabled", true),
                         lastRunTime = obj.optLong("lastRunTime", 0L),
-                        lastResult = obj.optString("lastResult", null)
+                        lastResult = if (obj.has("lastResult")) obj.getString("lastResult") else null
                     )
                 )
             }

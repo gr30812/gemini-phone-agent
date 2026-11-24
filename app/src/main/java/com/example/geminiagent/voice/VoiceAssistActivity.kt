@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -22,7 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -202,7 +203,7 @@ fun VoiceAssistBottomSheet(
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onOpenFullApp, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.OpenInNew, contentDescription = "Full App", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Full App", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
                         }
                         IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
@@ -248,7 +249,18 @@ fun VoiceAssistBottomSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Dynamic Audio Waveform Visualizer
+                LiveAudioWaveVisualizer(
+                    soundLevel = soundLevel,
+                    isListening = isListening,
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(32.dp)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Status & Live Transcription
                 Text(
@@ -335,5 +347,64 @@ fun VoiceAssistBottomSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun LiveAudioWaveVisualizer(
+    soundLevel: Float,
+    isListening: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "wave")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val midY = height / 2f
+        val amp = if (isListening) (height * 0.45f * (soundLevel.coerceIn(0.18f, 1f))) else (height * 0.1f)
+
+        // Wave 1 (Cyan)
+        val path1 = androidx.compose.ui.graphics.Path()
+        path1.moveTo(0f, midY)
+        val step = 8f
+        var x = 0f
+        while (x <= width) {
+            val y = midY + kotlin.math.sin((x / width * 3.5f * Math.PI.toFloat()) + phase) * amp
+            path1.lineTo(x, y)
+            x += step
+        }
+        drawPath(path1, color = Color(0xFF38BDF8).copy(alpha = 0.85f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
+
+        // Wave 2 (Blue)
+        val path2 = androidx.compose.ui.graphics.Path()
+        path2.moveTo(0f, midY)
+        x = 0f
+        while (x <= width) {
+            val y = midY + kotlin.math.cos((x / width * 2.8f * Math.PI.toFloat()) - phase * 0.8f) * (amp * 0.7f)
+            path2.lineTo(x, y)
+            x += step
+        }
+        drawPath(path2, color = Color(0xFF2563EB).copy(alpha = 0.75f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+
+        // Wave 3 (Purple accent)
+        val path3 = androidx.compose.ui.graphics.Path()
+        path3.moveTo(0f, midY)
+        x = 0f
+        while (x <= width) {
+            val y = midY + kotlin.math.sin((x / width * 4.2f * Math.PI.toFloat()) + phase * 1.2f) * (amp * 0.45f)
+            path3.lineTo(x, y)
+            x += step
+        }
+        drawPath(path3, color = Color(0xFFA78BFA).copy(alpha = 0.6f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
     }
 }

@@ -62,6 +62,7 @@ object GoogleServicesBridge {
 
             if (bestLocation != null) {
                 val geocoder = Geocoder(context, Locale.getDefault())
+                @Suppress("DEPRECATION")
                 val addresses = try {
                     geocoder.getFromLocation(bestLocation.latitude, bestLocation.longitude, 1)
                 } catch (_: Exception) { null }
