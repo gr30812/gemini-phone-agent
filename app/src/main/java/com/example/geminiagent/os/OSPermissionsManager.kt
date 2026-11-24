@@ -67,4 +67,32 @@ object OSPermissionsManager {
         }
         context.startActivity(intent)
     }
+
+    fun isDefaultAssistant(context: Context): Boolean {
+        return try {
+            val assistant = Settings.Secure.getString(context.contentResolver, "assistant") ?: ""
+            val voiceService = Settings.Secure.getString(context.contentResolver, "voice_interaction_service") ?: ""
+            assistant.contains(context.packageName) || voiceService.contains(context.packageName)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun openDefaultAssistantSettings(context: Context) {
+        try {
+            val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val intent = Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS").apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (_: Exception) {
+                openAppSettings(context)
+            }
+        }
+    }
 }

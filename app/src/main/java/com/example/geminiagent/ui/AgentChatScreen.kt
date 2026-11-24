@@ -1822,20 +1822,56 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 560.dp)
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("OS Permissions & Automation", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("OS Permissions & Voice Assistant", fontSize = 16.5.sp, fontWeight = FontWeight.Bold, color = Color.White)
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    "Enable OS permissions below so Antigravity Agent can read incoming WhatsApp messages, inspect the phone screen, simulate taps, and make calls.",
+                    "Enable OS permissions below so Antigravity Voice Agent can listen for 'Nord', answer 'Sir!', and control your phone.",
                     fontSize = 11.5.sp,
                     color = Color.LightGray
                 )
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // Default Digital Assistant
+                var isDefaultAssist by remember { mutableStateOf(OSPermissionsManager.isDefaultAssistant(context)) }
+                OSPermissionRow(
+                    title = "Default Digital Assistant",
+                    description = if (isDefaultAssist) "Nord Assistant is your default phone assistant! (Power hold / swipe)" else "Set as default assistant (replaces Google Assistant)",
+                    isGranted = isDefaultAssist,
+                    buttonText = if (isDefaultAssist) "Configured" else "Set as Default",
+                    onAction = {
+                        OSPermissionsManager.openDefaultAssistantSettings(context)
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Nord Wake Word Detection
+                var isHotwordOn by remember { mutableStateOf(com.example.geminiagent.voice.NordHotwordService.isEnabled(context)) }
+                OSPermissionRow(
+                    title = "Nord Wake Word Detection",
+                    description = if (isHotwordOn) "Active: Call 'Nord' -> Agent speaks 'Sir!' and listens" else "Disabled: Call 'Nord' to invoke assistant hands-free",
+                    isGranted = isHotwordOn,
+                    buttonText = if (isHotwordOn) "Stop" else "Enable",
+                    onAction = {
+                        if (isHotwordOn) {
+                            com.example.geminiagent.voice.NordHotwordService.stop(context)
+                            isHotwordOn = false
+                        } else {
+                            com.example.geminiagent.voice.NordHotwordService.start(context)
+                            isHotwordOn = true
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // 1. Notification Listener Access (WhatsApp & Chat alerts)
                 OSPermissionRow(
