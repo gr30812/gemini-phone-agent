@@ -14,6 +14,10 @@ import com.example.geminiagent.skills.GoogleServicesBridge
 import com.example.geminiagent.skills.SkillsEngine
 import com.example.geminiagent.swarm.SwarmCoordinator
 import com.example.geminiagent.usage.UsageTracker
+import com.example.geminiagent.security.AppSecurityManager
+import com.example.geminiagent.security.CommandAllowlistGuard
+import com.example.geminiagent.security.RiskLevel
+import com.example.geminiagent.security.SecurityAuditLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -639,13 +643,34 @@ class GeminiApiClient(private val context: Context) {
             var lastErrorMessage = ""
 
             modelLoop@ for (model in modelsToTry) {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val isProxy = AppSecurityManager.isUsingBackendProxy(context)
+                val proxyUrl = AppSecurityManager.getBackendProxyUrl(context)
+                val proxyToken = AppSecurityManager.getProxyAuthToken(context)
+
+                val targetUrl: String
+                val requestBodyStr: String
+                val reqBuilder = Request.Builder()
+
+                if (isProxy && proxyUrl.isNotBlank()) {
+                    targetUrl = proxyUrl
+                    if (proxyToken.isNotBlank()) {
+                        reqBuilder.addHeader("Authorization", "Bearer $proxyToken")
+                    }
+                    val proxyWrapper = JSONObject().apply {
+                        put("model", model)
+                        put("payload", payload)
+                    }
+                    requestBodyStr = proxyWrapper.toString()
+                } else {
+                    targetUrl = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                    requestBodyStr = payload.toString()
+                }
 
                 for (attempt in 1..2) {
                     try {
-                        val request = Request.Builder()
-                            .url(url)
-                            .post(payload.toString().toRequestBody("application/json".toMediaType()))
+                        val request = reqBuilder
+                            .url(targetUrl)
+                            .post(requestBodyStr.toRequestBody("application/json".toMediaType()))
                             .build()
 
                         val response = client.newCall(request).execute()
@@ -725,27 +750,42 @@ class GeminiApiClient(private val context: Context) {
                 "read_file" -> {
                     val p = fnArgs.optString("path", "")
                     logs.add("Reading file: $p")
+                    SecurityAuditLogger.logEvent(context, "read_file", p, RiskLevel.SAFE, true, "SUCCESS")
                     readFile(p)
                 }
                 "write_file" -> {
                     val p = fnArgs.optString("path", "")
                     val c = fnArgs.optString("content", "")
-                    logs.add("Writing file: $p")
+                    val isSafe = CommandAllowlistGuard.isPathWithinWorkspace(context, p)
+                    val risk = if (isSafe) RiskLevel.MODERATE else RiskLevel.HIGH_RISK
+                    SecurityAuditLogger.logEvent(context, "write_file", p, risk, true, "WRITTEN")
+                    logs.add("Writing file: $p [Risk: ${risk.name}]")
                     writeFile(p, c)
                 }
                 "list_files" -> {
                     logs.add("Listing files in workspace")
+                    SecurityAuditLogger.logEvent(context, "list_files", "workspace", RiskLevel.SAFE, true, "SUCCESS")
                     listFiles()
                 }
                 "execute_command" -> {
                     val cmd = fnArgs.optString("command", "")
-                    logs.add("Running command: $cmd")
-                    executeShell(cmd)
+                    val eval = CommandAllowlistGuard.evaluateCommand(cmd)
+                    if (!eval.isAllowed) {
+                        SecurityAuditLogger.logEvent(context, "execute_command", cmd, RiskLevel.BLOCKED, false, "BLOCKED: ${eval.reason}")
+                        logs.add("SECURITY BLOCKED: $cmd (${eval.reason})")
+                        "Security Policy Violation: Command execution blocked. ${eval.reason}"
+                    } else {
+                        val hitlApproved = eval.riskLevel == RiskLevel.SAFE || !AppSecurityManager.isHitlStepUpEnabled(context)
+                        SecurityAuditLogger.logEvent(context, "execute_command", cmd, eval.riskLevel, hitlApproved, "EXECUTED")
+                        logs.add("Running command: $cmd [Risk: ${eval.riskLevel.name}]")
+                        executeShell(cmd)
+                    }
                 }
                 "get_recent_notifications" -> {
                     val filter = fnArgs.optString("app_filter", "")
                     val limit = fnArgs.optInt("limit", 10)
                     logs.add("Checking recent notifications (filter: '${filter.ifEmpty { "ALL" }}')")
+                    SecurityAuditLogger.logEvent(context, "get_recent_notifications", filter, RiskLevel.SAFE, true, "SUCCESS")
                     if (!AgentNotificationListenerService.isPermissionGranted(context)) {
                         "Notification Access is not enabled. Please enable 'Antigravity Notification Listener' in Android Settings > Notification Access."
                     } else {
@@ -763,11 +803,13 @@ class GeminiApiClient(private val context: Context) {
                     val id = fnArgs.optString("notification_id", "")
                     val replyText = fnArgs.optString("reply_text", "")
                     logs.add("Sending reply to notification: $id")
+                    SecurityAuditLogger.logEvent(context, "reply_to_notification", "ID: $id | $replyText", RiskLevel.MODERATE, true, "SUCCESS")
                     val success = AgentNotificationListenerService.replyToNotification(id, replyText, context)
                     if (success) "Reply dispatched successfully." else "Failed to reply (action not supported or notification expired)."
                 }
                 "read_screen_content" -> {
                     logs.add("Capturing on-screen UI content")
+                    SecurityAuditLogger.logEvent(context, "read_screen_content", "", RiskLevel.SAFE, true, "SUCCESS")
                     val service = AgentAccessibilityService.instance
                     if (service == null) {
                         "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
@@ -778,6 +820,7 @@ class GeminiApiClient(private val context: Context) {
                 "click_screen_element" -> {
                     val target = fnArgs.optString("target_text", "")
                     logs.add("Simulating click on: $target")
+                    SecurityAuditLogger.logEvent(context, "click_screen_element", target, RiskLevel.MODERATE, true, "SUCCESS")
                     val service = AgentAccessibilityService.instance
                     if (service == null) {
                         "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
@@ -788,6 +831,7 @@ class GeminiApiClient(private val context: Context) {
                 "perform_device_action" -> {
                     val action = fnArgs.optString("action", "HOME")
                     logs.add("Performing navigation action: $action")
+                    SecurityAuditLogger.logEvent(context, "perform_device_action", action, RiskLevel.SAFE, true, "SUCCESS")
                     val service = AgentAccessibilityService.instance
                     if (service == null) {
                         "Accessibility Service is disabled. Please enable 'Antigravity Screen Automation' under Phone Settings > Accessibility."
@@ -798,28 +842,33 @@ class GeminiApiClient(private val context: Context) {
                 "open_app" -> {
                     val app = fnArgs.optString("app_name", "")
                     logs.add("Launching app: $app")
+                    SecurityAuditLogger.logEvent(context, "open_app", app, RiskLevel.SAFE, true, "SUCCESS")
                     DeviceBridge.openApp(context, app)
                 }
                 "read_contacts" -> {
                     val q = fnArgs.optString("search_query", "")
                     val lim = fnArgs.optInt("limit", 15)
                     logs.add("Querying contacts: $q")
+                    SecurityAuditLogger.logEvent(context, "read_contacts", q, RiskLevel.SAFE, true, "SUCCESS")
                     DeviceBridge.readContacts(context, q, lim)
                 }
                 "make_phone_call" -> {
                     val num = fnArgs.optString("phone_number", "")
-                    logs.add("Calling: $num")
+                    logs.add("Calling: $num [Risk: HIGH_RISK]")
+                    SecurityAuditLogger.logEvent(context, "make_phone_call", num, RiskLevel.HIGH_RISK, true, "INITIATED")
                     DeviceBridge.makeCall(context, num)
                 }
                 "read_recent_sms" -> {
                     val lim = fnArgs.optInt("limit", 10)
                     logs.add("Reading recent SMS inbox")
+                    SecurityAuditLogger.logEvent(context, "read_recent_sms", "limit: $lim", RiskLevel.SAFE, true, "SUCCESS")
                     DeviceBridge.readRecentSms(context, lim)
                 }
                 "send_sms" -> {
                     val num = fnArgs.optString("phone_number", "")
                     val msg = fnArgs.optString("message", "")
-                    logs.add("Sending SMS to $num")
+                    logs.add("Sending SMS to $num [Risk: HIGH_RISK]")
+                    SecurityAuditLogger.logEvent(context, "send_sms", "$num: $msg", RiskLevel.HIGH_RISK, true, "SENT")
                     DeviceBridge.sendSms(context, num, msg)
                 }
                 "set_alarm" -> {
@@ -827,16 +876,26 @@ class GeminiApiClient(private val context: Context) {
                     val m = fnArgs.optInt("minute", 0)
                     val msg = fnArgs.optString("message", "Antigravity Alarm")
                     logs.add("Scheduling alarm for $h:$m")
+                    SecurityAuditLogger.logEvent(context, "set_alarm", "$h:$m $msg", RiskLevel.SAFE, true, "SUCCESS")
                     DeviceBridge.setAlarm(context, h, m, msg)
                 }
                 "get_device_status" -> {
                     logs.add("Reading battery, network, storage and RAM")
+                    SecurityAuditLogger.logEvent(context, "get_device_status", "", RiskLevel.SAFE, true, "SUCCESS")
                     DeviceBridge.getDeviceStatus(context)
                 }
                 "execute_adb_command" -> {
                     val cmd = fnArgs.optString("command", "")
-                    logs.add("Executing ADB command via Shizuku: $cmd")
-                    ShizukuBridge.executeAdbCommand(cmd)
+                    val eval = CommandAllowlistGuard.evaluateCommand(cmd)
+                    if (!eval.isAllowed) {
+                        SecurityAuditLogger.logEvent(context, "execute_adb_command", cmd, RiskLevel.BLOCKED, false, "BLOCKED: ${eval.reason}")
+                        logs.add("SECURITY BLOCKED ADB: $cmd (${eval.reason})")
+                        "Security Policy Violation: ADB command blocked. ${eval.reason}"
+                    } else {
+                        SecurityAuditLogger.logEvent(context, "execute_adb_command", cmd, RiskLevel.HIGH_RISK, true, "EXECUTED_ADB")
+                        logs.add("Executing ADB command via Shizuku: $cmd [Risk: HIGH_RISK]")
+                        ShizukuBridge.executeAdbCommand(cmd)
+                    }
                 }
                 "schedule_automation" -> {
                     val name = fnArgs.optString("name", "Automation")

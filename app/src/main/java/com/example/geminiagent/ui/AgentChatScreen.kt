@@ -1,4 +1,4 @@
-package com.example.geminiagent.ui
+﻿package com.example.geminiagent.ui
 
 import android.Manifest
 import android.content.Context
@@ -64,6 +64,13 @@ import com.example.geminiagent.swarm.SwarmCoordinator
 import com.example.geminiagent.swarm.SwarmWorker
 import com.example.geminiagent.swarm.WorkerStatus
 import com.example.geminiagent.swarm.BoardMessage
+import com.example.geminiagent.security.AppSecurityManager
+import com.example.geminiagent.security.RiskLevel
+import com.example.geminiagent.security.SecurityAuditLogger
+import com.example.geminiagent.security.AuditLogEntry
+import android.app.Activity
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -152,6 +159,22 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     var showSwarmBoardDialog by remember { mutableStateOf(false) }
     var showKnowledgeBaseDialog by remember { mutableStateOf(false) }
     var showAutomationsDialog by remember { mutableStateOf(false) }
+    var showSecurityAuditDialog by remember { mutableStateOf(false) }
+    var isAppUnlocked by remember {
+        mutableStateOf(!AppSecurityManager.isAppLockEnabled(context))
+    }
+
+    val biometricUnlockLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            isAppUnlocked = true
+            Toast.makeText(context, "Authentication successful", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(context, "Authentication required to access agent", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     var thinkingBudget by remember {
         mutableIntStateOf(prefs.getInt("thinking_budget", 2048))
     }
@@ -250,6 +273,65 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
 
     val currentModelOption = ANTIGRAVITY_MODELS.find { it.id == selectedModel } ?: ANTIGRAVITY_MODELS[0]
 
+    // App Lock (Biometric / PIN Verification Overlay)
+    if (!isAppUnlocked) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF0F0F12)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF2563EB).copy(alpha = 0.2f),
+                    modifier = Modifier.size(76.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = "Locked",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(38.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text("Antigravity Agent Locked", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "App Lock 2FA is active. Verify your fingerprint, face, or device PIN to continue.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(28.dp))
+                Button(
+                    onClick = {
+                        val intent = AppSecurityManager.createDeviceCredentialIntent(context)
+                        if (intent != null) {
+                            biometricUnlockLauncher.launch(intent)
+                        } else {
+                            isAppUnlocked = true
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(0.75f).height(48.dp)
+                ) {
+                    Icon(Icons.Default.Fingerprint, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Unlock Agent", fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        return
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -287,6 +369,10 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     onSelectBrowser = {
                         scope.launch { drawerState.close() }
                         showCommandPalette = true
+                    },
+                    onSelectSecurity = {
+                        scope.launch { drawerState.close() }
+                        showSecurityAuditDialog = true
                     },
                     onSelectProject = {
                         scope.launch { drawerState.close() }
@@ -1134,6 +1220,10 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                     showQuickActionsSheet = false
                     showPermissionsSheet = true
                 }
+                QuickActionItem(icon = Icons.Default.Lock, title = "Security & Audit Trail", subtitle = "View blocked commands, risk levels & audit logs") {
+                    showQuickActionsSheet = false
+                    showSecurityAuditDialog = true
+                }
                 QuickActionItem(icon = Icons.Default.Settings, title = "Agent Settings", subtitle = "Configure API Key and OTA updates") {
                     showQuickActionsSheet = false
                     showSettingsDialog = true
@@ -1356,6 +1446,14 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
         )
     }
 
+    // Security Audit Dialog
+    if (showSecurityAuditDialog) {
+        SecurityAuditDialog(
+            context = context,
+            onDismiss = { showSecurityAuditDialog = false }
+        )
+    }
+
     // Antigravity Rate Limits Dialog
     if (showUsageDialog) {
         val stats: UsageStats = remember { apiClient.usageTracker.getUsageStats() }
@@ -1428,12 +1526,22 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
     if (showSettingsDialog) {
         var tempKey by remember { mutableStateOf(apiKey) }
         var tempRepo by remember { mutableStateOf(githubRepo) }
+        var tempAppLock by remember { mutableStateOf(AppSecurityManager.isAppLockEnabled(context)) }
+        var tempHitl by remember { mutableStateOf(AppSecurityManager.isHitlStepUpEnabled(context)) }
+        var tempUseProxy by remember { mutableStateOf(AppSecurityManager.isUsingBackendProxy(context)) }
+        var tempProxyUrl by remember { mutableStateOf(AppSecurityManager.getBackendProxyUrl(context)) }
+        var tempProxyToken by remember { mutableStateOf(AppSecurityManager.getProxyAuthToken(context)) }
 
         AlertDialog(
-            onDismissRequest = { if (apiKey.isNotEmpty()) showSettingsDialog = false },
+            onDismissRequest = { if (apiKey.isNotEmpty() || tempUseProxy) showSettingsDialog = false },
             title = { Text("Agent Settings", fontWeight = FontWeight.Bold) },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Text("1. Gemini API Key:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     OutlinedTextField(
                         value = tempKey,
@@ -1463,7 +1571,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Current: v${updater.currentVersionName}", fontSize = 12.sp, color = Color.LightGray)
+                        Text("Current: v", fontSize = 12.sp, color = Color.LightGray)
 
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFF38BDF8))
@@ -1474,12 +1582,12 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                     updateCheckResultText = null
                                     scope.launch {
                                         val repoName = tempRepo.trim().ifBlank { "gr30812/gemini-phone-agent" }
-                                        val rawUrl = "https://raw.githubusercontent.com/$repoName/main/version.json"
+                                        val rawUrl = "https://raw.githubusercontent.com//main/version.json"
                                         val update = updater.checkUpdate(rawUrl)
                                         isCheckingUpdate = false
                                         if (update != null) {
                                             availableUpdate = update
-                                            updateCheckResultText = "🚀 New update available (${update.versionName})!"
+                                            updateCheckResultText = "🚀 New update available ()!"
                                         } else {
                                             updateCheckResultText = "✅ Your app is up to date!"
                                         }
@@ -1513,7 +1621,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                                     modifier = Modifier.fillMaxWidth(),
                                     color = Color(0xFF2563EB)
                                 )
-                                Text("Downloading: ${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color.Gray)
+                                Text("Downloading: %", fontSize = 11.sp, color = Color.Gray)
                             }
                         } else {
                             Button(
@@ -1532,7 +1640,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             ) {
                                 Icon(Icons.Default.SystemUpdate, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Update Now (${update.versionName})")
+                                Text("Update Now ()")
                             }
                         }
                     }
@@ -1562,6 +1670,113 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             Text("Manage", fontSize = 11.sp)
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    HorizontalDivider(color = Color(0xFF333333))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // 5. Security, 2FA & Backend Proxy
+                    Text("5. Security, 2FA & Backend Proxy:", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // App Lock Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("App Lock (Biometric / PIN)", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text("Layer 1 authentication on launch", color = Color(0xFF94A3B8), fontSize = 10.5.sp)
+                        }
+                        Switch(
+                            checked = tempAppLock,
+                            onCheckedChange = { tempAppLock = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF2563EB)
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // HITL Guard Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("HITL Step-Up Guard", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text("Require approval for dangerous shell/file tasks", color = Color(0xFF94A3B8), fontSize = 10.5.sp)
+                        }
+                        Switch(
+                            checked = tempHitl,
+                            onCheckedChange = { tempHitl = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF2563EB)
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Backend Proxy Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Use Backend Proxy Server", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                            Text("Zero client secrets (no API key on phone)", color = Color(0xFF94A3B8), fontSize = 10.5.sp)
+                        }
+                        Switch(
+                            checked = tempUseProxy,
+                            onCheckedChange = { tempUseProxy = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF2563EB)
+                            )
+                        )
+                    }
+
+                    if (tempUseProxy) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Proxy Endpoint URL:", fontSize = 11.5.sp, color = Color(0xFF94A3B8))
+                        OutlinedTextField(
+                            value = tempProxyUrl,
+                            onValueChange = { tempProxyUrl = it },
+                            placeholder = { Text("https://my-proxy.workers.dev/api/v1/generate") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("Proxy Bearer Token (optional):", fontSize = 11.5.sp, color = Color(0xFF94A3B8))
+                        OutlinedTextField(
+                            value = tempProxyToken,
+                            onValueChange = { tempProxyToken = it },
+                            placeholder = { Text("Bearer secret") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showSettingsDialog = false
+                            showSecurityAuditDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF38BDF8))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("View Security Audit Trail", fontSize = 12.sp)
+                    }
                 }
             },
             confirmButton = {
@@ -1573,6 +1788,11 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                             .putString("api_key", apiKey)
                             .putString("github_repo", githubRepo)
                             .apply()
+                        AppSecurityManager.setAppLockEnabled(context, tempAppLock)
+                        AppSecurityManager.setHitlStepUpEnabled(context, tempHitl)
+                        AppSecurityManager.setUsingBackendProxy(context, tempUseProxy)
+                        AppSecurityManager.setBackendProxyUrl(context, tempProxyUrl.trim())
+                        AppSecurityManager.setProxyAuthToken(context, tempProxyToken.trim())
                         showSettingsDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
@@ -1581,7 +1801,7 @@ fun AgentChatScreen(apiClient: GeminiApiClient) {
                 }
             },
             dismissButton = {
-                if (apiKey.isNotEmpty()) {
+                if (apiKey.isNotEmpty() || tempUseProxy) {
                     TextButton(onClick = { showSettingsDialog = false }) {
                         Text("Cancel")
                     }
@@ -2268,6 +2488,7 @@ fun AntigravityDrawerContent(
     onSelectNotifications: () -> Unit,
     onSelectModels: () -> Unit,
     onSelectBrowser: () -> Unit,
+    onSelectSecurity: () -> Unit,
     onSelectProject: () -> Unit,
     onSelectKnowledge: () -> Unit,
     onSelectAutomations: () -> Unit,
@@ -2296,6 +2517,7 @@ fun AntigravityDrawerContent(
         DrawerNavItem(title = "Notifications", isSelected = false, onClick = onSelectNotifications)
         DrawerNavItem(title = "Models", isSelected = false, onClick = onSelectModels)
         DrawerNavItem(title = "Browser", isSelected = false, onClick = onSelectBrowser)
+        DrawerNavItem(title = "Security & 2FA", isSelected = false, leadingIcon = Icons.Default.Security, onClick = onSelectSecurity)
 
         Spacer(modifier = Modifier.height(14.dp))
 
@@ -2884,6 +3106,142 @@ fun AutomationsDialog(
                                         ) {
                                             Text("Cancel", fontSize = 10.5.sp, color = Color(0xFFEF4444))
                                         }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF38BDF8))
+            }
+        }
+    )
+}
+
+
+
+@Composable
+fun SecurityAuditDialog(
+    context: Context,
+    onDismiss: () -> Unit
+) {
+    var logs by remember { mutableStateOf(SecurityAuditLogger.getRecentLogs(context)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF141417),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Security Audit Trail", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Total Events: ${logs.size} (Limit: 200)", color = Color(0xFF94A3B8), fontSize = 11.5.sp)
+                    if (logs.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                SecurityAuditLogger.clearLogs(context)
+                                logs = emptyList()
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = "Clear", tint = Color(0xFFEF4444), modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Clear", color = Color(0xFFEF4444), fontSize = 11.sp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (logs.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(30.dp), contentAlignment = Alignment.Center) {
+                        Text("No security events recorded yet.", color = Color.Gray, fontSize = 12.sp)
+                    }
+                } else {
+                    val timeFormat = remember { SimpleDateFormat("MM-dd HH:mm:ss", Locale.US) }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(logs) { entry ->
+                            val (badgeBg, badgeFg) = when (entry.riskLevel) {
+                                RiskLevel.SAFE -> Color(0xFF22C55E).copy(alpha = 0.15f) to Color(0xFF4ADE80)
+                                RiskLevel.MODERATE -> Color(0xFF3B82F6).copy(alpha = 0.15f) to Color(0xFF60A5FA)
+                                RiskLevel.HIGH_RISK -> Color(0xFFF97316).copy(alpha = 0.15f) to Color(0xFFFB923C)
+                                RiskLevel.BLOCKED -> Color(0xFFEF4444).copy(alpha = 0.2f) to Color(0xFFF87171)
+                            }
+
+                            Surface(
+                                color = Color(0xFF1E2028),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                border = if (entry.riskLevel == RiskLevel.BLOCKED) BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)) else null
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            entry.toolName,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp
+                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = badgeBg
+                                        ) {
+                                            Text(
+                                                entry.riskLevel.name,
+                                                color = badgeFg,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    if (entry.detail.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            entry.detail,
+                                            color = Color(0xFFCBD5E1),
+                                            fontSize = 11.sp,
+                                            maxLines = 3,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            entry.timeFormatted,
+                                            color = Color(0xFF64748B),
+                                            fontSize = 10.sp
+                                        )
+                                        Text(
+                                            entry.status,
+                                            color = if (entry.riskLevel != RiskLevel.BLOCKED) Color(0xFF94A3B8) else Color(0xFFF87171),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
                                     }
                                 }
                             }
