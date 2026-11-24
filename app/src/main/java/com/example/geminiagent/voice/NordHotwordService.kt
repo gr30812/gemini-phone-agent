@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -36,40 +37,58 @@ class NordHotwordService : Service() {
             private set
 
         fun start(context: Context) {
-            val intent = Intent(context, NordHotwordService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                val intent = Intent(context, NordHotwordService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_ENABLED, true).apply()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start NordHotwordService", e)
             }
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(KEY_ENABLED, true).apply()
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, NordHotwordService::class.java)
-            context.stopService(intent)
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit().putBoolean(KEY_ENABLED, false).apply()
+            try {
+                val intent = Intent(context, NordHotwordService::class.java)
+                context.stopService(intent)
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit().putBoolean(KEY_ENABLED, false).apply()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to stop NordHotwordService", e)
+            }
         }
 
         fun isEnabled(context: Context): Boolean {
             return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getBoolean(KEY_ENABLED, false)
+                .getBoolean(KEY_ENABLED, true)
         }
     }
 
     private var speechRecognizer: SpeechRecognizer? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isListeningLoopActive = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private val wakeWords = listOf(
         "nord", "node", "north", "norde", "nort", "nerd", "lord",
-        "hey nord", "ok nord", "hello nord", "hi nord"
+        "not", "note", "mode", "noor", "hey nord", "ok nord", "hello nord", "hi nord",
+        "alexa nord", "gemini nord"
     )
 
     override fun onCreate() {
         super.onCreate()
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GeminiAgent::NordHotwordWakeLock")
+            wakeLock?.acquire(24 * 60 * 60 * 1000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to acquire wakeLock", e)
+        }
+
         VoiceTtsManager.init(this)
         createNotificationChannel()
     }
@@ -105,7 +124,7 @@ class NordHotwordService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Nord Assistant Active")
-            .setContentText("Call 'Nord' to activate voice command")
+            .setContentText("Say 'Nord' anytime to give orders")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -115,7 +134,7 @@ class NordHotwordService : Service() {
 
     private fun startWakeWordListening() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Log.e(TAG, "SpeechRecognizer not available")
+            Log.e(TAG, "SpeechRecognizer not available on this device")
             return
         }
 
@@ -128,17 +147,29 @@ class NordHotwordService : Service() {
 
         try {
             destroyRecognizer()
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
+
+            val isDeviceRecogAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+
+            speechRecognizer = if (isDeviceRecogAvailable) {
+                Log.d(TAG, "Creating On-Device SpeechRecognizer for low-latency wake word")
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(this)
+            }.apply {
                 setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        Log.d(TAG, "Ready and listening for 'Nord'...")
+                    }
                     override fun onBeginningOfSpeech() {}
                     override fun onRmsChanged(rmsdB: Float) {}
                     override fun onBufferReceived(buffer: ByteArray?) {}
                     override fun onEndOfSpeech() {}
 
                     override fun onError(error: Int) {
-                        // Restart recognition loop on silence or timeout
-                        scheduleRestart(250)
+                        Log.d(TAG, "SpeechRecognizer error: $error")
+                        destroyRecognizer()
+                        scheduleRestart(150)
                     }
 
                     override fun onResults(results: Bundle?) {
@@ -158,20 +189,21 @@ class NordHotwordService : Service() {
             val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+                putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             }
 
             speechRecognizer?.startListening(recognizerIntent)
         } catch (e: Exception) {
             Log.e(TAG, "Error starting wake word listener", e)
-            scheduleRestart(1000)
+            scheduleRestart(500)
         }
     }
 
     private fun processRecognizedPhrases(matches: List<String>?) {
         if (matches == null) {
-            scheduleRestart(250)
+            scheduleRestart(150)
             return
         }
 
@@ -183,7 +215,7 @@ class NordHotwordService : Service() {
         if (detected) {
             onWakeWordDetected()
         } else {
-            scheduleRestart(200)
+            scheduleRestart(150)
         }
     }
 
@@ -191,35 +223,53 @@ class NordHotwordService : Service() {
         Log.i(TAG, "Wake word 'Nord' detected! Responding: 'Sir!'")
         vibrate()
 
-        // Temporarily pause listening loop so it doesn't recognize own voice
+        // 1. Wake up the screen if off / locked
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val screenWakeLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "GeminiAgent::ScreenWakeLock"
+            )
+            screenWakeLock.acquire(4000L)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to wake up screen", e)
+        }
+
+        // 2. Temporarily pause recognizer so it does not capture TTS output
         destroyRecognizer()
 
-        // Speak "Sir!" immediately
+        // 3. Speak "Sir!" immediately via offline TTS
         VoiceTtsManager.speakAck {
             mainHandler.post {
-                // Open VoiceAssistActivity to capture user's order
+                // 4. Launch VoiceAssistActivity over lock screen
                 val assistIntent = Intent(this@NordHotwordService, VoiceAssistActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    )
                     putExtra("AUTO_LISTEN", true)
                 }
                 startActivity(assistIntent)
             }
         }
 
-        // Restart listening after 5 seconds
-        scheduleRestart(5000)
+        // Restart wake word loop after 4 seconds
+        scheduleRestart(4000)
     }
 
     private fun vibrate() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vibratorManager?.defaultVibrator?.vibrate(VibrationEffect.createOneShot(120, VibrationEffect.DEFAULT_AMPLITUDE))
+                vibratorManager?.defaultVibrator?.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
             } else {
                 @Suppress("DEPRECATION")
                 val v = getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
                 @Suppress("DEPRECATION")
-                v?.vibrate(120)
+                v?.vibrate(150)
             }
         } catch (_: Exception) {}
     }
@@ -247,6 +297,11 @@ class NordHotwordService : Service() {
         isListeningLoopActive = false
         mainHandler.removeCallbacksAndMessages(null)
         destroyRecognizer()
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (_: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

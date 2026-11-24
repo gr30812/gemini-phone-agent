@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
 
     private fun checkAndRequestPermissions() {
         AgentForegroundService.startService(this)
+        com.example.geminiagent.voice.NordHotwordService.start(this)
         val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)

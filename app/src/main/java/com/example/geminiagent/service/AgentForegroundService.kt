@@ -48,6 +48,7 @@ class AgentForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = createNotification()
         startForeground(NOTIFICATION_ID, notification)
+        com.example.geminiagent.voice.NordHotwordService.start(this)
         return START_STICKY
     }
 
